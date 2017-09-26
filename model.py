@@ -24,7 +24,7 @@ class environment(object):
         self.endJulian = 181;        
         
         # set location 
-        self.location = ee.Geometry.Polygon([[105.91,21.02],[105.910,21.601],[105.320,21.601],[105.325,21.002],[105.919,21.020]]) #ee.Geometry.Point([105.809,21.074])
+        self.location = ee.Geometry.Polygon([[[105.91,21.02],[105.910,21.601],[105.1,21.601],[105.1325,21.002],[105.919,21.020]]]) #ee.Geometry.Point([105.809,21.074])
         
         # variable to filter cloud threshold
         self.metadataCloudCoverMax = 25
@@ -43,6 +43,8 @@ class environment(object):
         self.maskSR = True
         self.maskCF = True
         
+        self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','cfmask'])
+              
         # apply defringe
         self.defringe = True
         
@@ -132,7 +134,7 @@ class SurfaceReflectance():
         collection = self.GetLandsat()
         
         img = ee.Image(collection.median())
-        self.ExportToAsset(img,"test_median")
+        self.ExportToAsset(img,"test_median1")
         
         # calculate the percentiles
         #percentiles = self.CalculatePercentiles(collection)
@@ -165,7 +167,7 @@ class SurfaceReflectance():
             if self.env.maskSR == True:
                 landsat4 = landsat4.map(self.CloudMaskCF)
             if not merge:
-			landsatCollection = landsat4
+			landsatCollection = landsat4.select(self.env.sensorBandDictLandsatSR.get('L4'),self.env.bandNamesLandsat)
 			merge = True
 
         # landsat 5 image collections 
@@ -182,7 +184,7 @@ class SurfaceReflectance():
 			landsatCollection = landsat5
 			merge = True
             else:
-			landsatCollection = landsatCollection.merge(landsat5)
+			landsatCollection = landsatCollection.merge(landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat))
         
         # landsat 7 image collections  
         if self.env.useL7:
@@ -198,7 +200,7 @@ class SurfaceReflectance():
 			landsatCollection = landsat7
 			merge = True
             else:
-			landsatCollection = landsatCollection.merge(landsat7)
+			landsatCollection = landsatCollection.merge(landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat))
 
         # landsat8  image collections 				        
         if self.env.useL8:
@@ -212,7 +214,7 @@ class SurfaceReflectance():
 			landsatCollection = landsat8
 			merge = True
             else:
-			landsatCollection = landsatCollection.merge(landsat8)            
+			landsatCollection = landsatCollection.merge(landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat))            
        
         count = landsatCollection.size();
         
@@ -280,7 +282,7 @@ class SurfaceReflectance():
         logging.info('export image to asset: ' + str(outputName))   
         
             
-        task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description="exportJob", assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,crs='EPSG:4326')
+        task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description="exportJob", assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
         
         # start task
         task_ordered.start()
