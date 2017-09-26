@@ -18,13 +18,13 @@ class environment(object):
         ee.Initialize()
        
         # set dates
-        self.startYear = 1999;
+        self.startYear = 1995;
         self.endYear = 2008;
         self.startJulian = 1;
         self.endJulian = 181;        
         
         # set location 
-        self.location = ee.Geometry.Point([105.809,21.074])
+        self.location = ee.Geometry.Polygon([[105.91,21.02],[105.910,21.601],[105.320,21.601],[105.325,21.002],[105.919,21.020]]) #ee.Geometry.Point([105.809,21.074])
         
         # variable to filter cloud threshold
         self.metadataCloudCoverMax = 25
@@ -131,8 +131,8 @@ class SurfaceReflectance():
         # get the images
         collection = self.GetLandsat()
         
-        img = ee.Image(collection.first())
-        self.ExportToAsset(img,"test")
+        img = ee.Image(collection.median())
+        self.ExportToAsset(img,"test_median")
         
         # calculate the percentiles
         #percentiles = self.CalculatePercentiles(collection)
@@ -277,9 +277,10 @@ class SurfaceReflectance():
         """export to asset """
         
         outputName = self.env.userID + assetName
-        logging.info('export image to asset: ' + str(outputName))       
+        logging.info('export image to asset: ' + str(outputName))   
         
-        task_ordered = ee.batch.Export.image.toAsset(ee.Image(img), "exportJob", outputName, maxPixels=1e13)
+            
+        task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description="exportJob", assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,crs='EPSG:4326')
         
         # start task
         task_ordered.start()
