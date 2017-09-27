@@ -7,6 +7,7 @@ Created on Mon Sep 25 14:47:06 2017
 
 import ee
 import logging
+import time
 
 class environment(object):
     
@@ -17,6 +18,8 @@ class environment(object):
         # Initialize the Earth Engine object, using the authentication credentials.
         ee.Initialize()
        
+	self.timeString = time.strftime("%Y%m%d_%H%M%S")
+       
         # set dates
         self.startYear = 2003;
         self.endYear = 2004;
@@ -24,12 +27,15 @@ class environment(object):
         self.endJulian = 366;        
         
         # set location 
-        self.location = ee.Geometry.Polygon([[[103.294,17.923],[103.294,17.923],[106.453,17.923],[106.453,20.469],[103.2941,20.469],[103.294,17.923]]])
+        #self.location = ee.Geometry.Polygon([[[103.294,17.923],[103.294,17.923],[106.453,17.923],[106.453,20.469],[103.2941,20.469],[103.294,17.923]]])
         
-        #ee.Geometry.Polygon([[[103.91,20.02],[103.910,20.601],[103.1,20.601],[103.1325,20.002],[104.919,20.020]]]) #ee.Geometry.Point([105.809,21.074])
+        self.location = ee.Geometry.Polygon([[[103.91,20.02],[103.910,20.601],[103.1,20.601],[103.1325,20.002],[104.919,20.020]]]) #ee.Geometry.Point([105.809,21.074])
         
         # variable to filter cloud threshold
         self.metadataCloudCoverMax = 25
+        
+        # threshold for landsatCloudScore
+        self.cloudThresh = 1
         
         # percentiles to filter for bad data
         self.lowPercentile = 1
@@ -44,7 +50,8 @@ class environment(object):
         # apply cloud masks
         self.maskSR = True
         self.maskCF = True
-        
+        self.cloudScore = False
+	
         self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','cfmask'])
               
         # apply defringe
@@ -118,14 +125,13 @@ class SurfaceReflectance():
         # import the log library
         
         import logging
-        # set the logfile
-        logging.basicConfig(filename='model.log', filemode='w', level=logging.DEBUG)
-        
-        # Initialize the Earth Engine object, using the authentication credentials.
-        ee.Initialize()
-        
-        # get the environment
+	
+	# get the environment
         self.env = environment()
+  
+        # set the logfile
+        logging.basicConfig(filename=str(self.env.timeString) + 'model.log', filemode='w', level=logging.DEBUG)
+                
     
     def RunModel(self):
         """Run the SR model"""  
@@ -136,22 +142,26 @@ class SurfaceReflectance():
         startDate = ee.Date.fromYMD(self.env.startYear,1,1)
         endDate = ee.Date.fromYMD(self.env.endYear,1,1)    
         
+	logging.info('startDate = ' + str(startDate.getInfo()))
+	logging.info('endDatDate = ' + str(startDate.getInfo()))
+	logging.info('Cloudcover filter = ' + str(self.env.metadataCloudCoverMax))	
+	
         # get the images
         collection = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
-        
-       
-        outputName = "testmask3_" + str(self.env.startYear)
-        
-        
+               
+        outputName = "testmask_percentile1_" + str(self.env.startYear)
+                
         # calculate the percentiles
         
         #print percentiles.getInfo()
-         
-        #collection = collection.map(self.MaskPercentile) 
-	img = ee.Image(collection.median())  
+	
+        col = collection.map(self.MaskPercentile) 
+
+	img = ee.Image(col.median())  
+
 	self.ExportToAsset(img,outputName)         
-        #print filteredCollection
-        return  collection
+       
+        return  col
         
           
     # Obtain Landsat image collections 
@@ -175,8 +185,8 @@ class SurfaceReflectance():
             if self.env.maskSR == True:
                 landsat4 = landsat4.map(self.CloudMaskCF)
             if not merge:
-			landsatCollection = landsat4.select(self.env.sensorBandDictLandsatSR.get('L4'),self.env.bandNamesLandsat)
-			merge = True
+		landsatCollection = landsat4.select(self.env.sensorBandDictLandsatSR.get('L4'),self.env.bandNamesLandsat)
+		merge = True
 
         # landsat 5 image collections 
         if self.env.useL5:
@@ -189,10 +199,10 @@ class SurfaceReflectance():
             if self.env.maskSR == True:
                 landsat5 = landsat5.map(self.CloudMaskCF)
             if not merge:
-			landsatCollection = landsat5
-			merge = True
+		landsatCollection = landsat5
+		merge = True
             else:
-			landsatCollection = landsatCollection.merge(landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat))
+		landsatCollection = landsatCollection.merge(landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat))
         
         # landsat 7 image collections  
         if self.env.useL7:
@@ -205,10 +215,10 @@ class SurfaceReflectance():
             if self.env.maskSR == True:
                 landsat7 = landsat7.map(self.CloudMaskCF)
             if not merge:
-			landsatCollection = landsat7
-			merge = True
+		landsatCollection = landsat7
+		merge = True
             else:
-			landsatCollection = landsatCollection.merge(landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat))
+		landsatCollection = landsatCollection.merge(landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat))
 
         # landsat8  image collections 				        
         if self.env.useL8:
@@ -219,15 +229,19 @@ class SurfaceReflectance():
             if self.env.maskSR == True:
                 landsat8 = landsat8.map(self.CloudMaskCF)            
             if not merge:
-			landsatCollection = landsat8
-			merge = True
+		landsatCollection = landsat8
+		merge = True
             else:
-			landsatCollection = landsatCollection.merge(landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat))            
+		landsatCollection = landsatCollection.merge(landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat))            
        
         count = landsatCollection.size();
         
-        logging.info('scaling images');
+        
         landsatCollection = landsatCollection.map(self.ScaleLandsat)
+        
+	if self.env.cloudScore == True:
+	    landsatCollection = landsatCollection.map(self.landsatCloudScore)
+	
        
         logging.info('counted ' + str(count.getInfo()) +' images');           
         logging.info('returning imagecollection')
@@ -294,27 +308,68 @@ class SurfaceReflectance():
 	"""mask light and dark pixels """
 	logging.info('mask light and dark areas')
 	
-	percentiles = self.CalculatePercentiles()
-		
-	upper = "blue_p" + str(int(self.env.highPercentile))
-	lower = "blue_p" + str(int(self.env.lowPercentile))
-        
-        darkMask = img.gt(percentiles.select(lower))
-	lightMask = img.lt(percentiles.select(upper))
+	# GEE adds _p_percentile to bandname
+	upper = str(int(self.env.highPercentile))
+	lower = str(int(self.env.lowPercentile))
 	
-	return img.updateMask(lightMask).updateMask(darkMask)
+	# we dont want to include the mask
+	selectedBandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2'])
+
+	# get the upper and lower band
+	bandsUpper = ee.List(['blue_p' + upper,'green_p'+ upper,'red_p'+ upper,'nir_p'+ upper,'swir1_p'+ upper,'swir2_p'+ upper])
+	bandsLower = ee.List(['blue_p' + lower,'green_p'+ lower,'red_p'+ lower,'nir_p'+ lower,'swir1_p'+ lower,'swir2_p'+ lower])
+	  
+	percentilesUp = ee.Image(self.CalculatePercentiles()).select(bandsUpper,selectedBandNamesLandsat )
+	percentilesLow = ee.Image(self.CalculatePercentiles()).select(bandsLower,selectedBandNamesLandsat )
+	
+	imgToMask = img.select(selectedBandNamesLandsat)
+			 
+	darkMask = ee.Image(imgToMask.gt(percentilesLow).reduce(ee.Reducer.sum())).eq(0)
+	lightMask = ee.Image(imgToMask.lt(percentilesUp).reduce(ee.Reducer.sum())).eq(0)
+	    
+	return img.updateMask(lightMask).updateMask(lightMask)
+
  
+    def landsatCloudScore(self,img):
+	""" Compute a cloud score and adds a band that represents the cloud mask.  
+	This expects the input image to have the common band names: 
+	["red", "blue", etc], so it can work across sensors. """
+
+	logging.info('running landsatCloudscore =' + str(self.env.cloudThreshold))
+        
+	# Compute several indicators of cloudiness and take the minimum of them.
+        # Clouds are reasonably bright in the blue band.
+        score = score.min(rescale(img, 'img.blue', [0.1, 0.3]));
+ 
+        # Clouds are reasonably bright in all visible bands.
+        score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]));
+   
+        # Clouds are reasonably bright in all infrared bands.
+        score = score.min(self.rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]));
+
+        # edit Ate cfmask uses therman band to detect clouds
+        # Clouds are reasonably cool in temperature.
+        #score = score.min(rescale(img,'img.temp', [300, 290]));
+
+        # However, clouds are not snow.
+        ndsi = img.normalizedDifference(['green', 'swir1']);
+        score =  score.min(rescale(ndsi, 'img', [0.8, 0.6])).multiply(100).byte();
+        score = score.lt(self.env.cloudThresh).rename('cloudMask');
+        
+	loggin.info('finished cloudscore')
+	
+        return img.updateMask(score);
  
  
  
     def ExportToAsset(self,img,assetName):  
         """export to asset """
         
-        outputName = self.env.userID + assetName
+        outputName = self.env.userID + str(self.env.timeString) + assetName
         logging.info('export image to asset: ' + str(outputName))   
-        
-            
-        task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description="exportJob", assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
+
+                    
+        task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=str(self.env.timeString)+"_exportJob", assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
         
         # start task
         task_ordered.start()
