@@ -35,7 +35,7 @@ class environment(object):
         self.metadataCloudCoverMax = 25
         
         # threshold for landsatCloudScore
-        self.cloudThresh = 1
+        self.cloudThreshold = 1
         
         # percentiles to filter for bad data
         self.lowPercentile = 1
@@ -50,7 +50,7 @@ class environment(object):
         # apply cloud masks
         self.maskSR = True
         self.maskCF = True
-        self.cloudScore = False
+        self.cloudScore = True
 	
         self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','cfmask'])
               
@@ -58,7 +58,7 @@ class environment(object):
         self.defringe = True
         
         # pixel size
-        self.pixSize = 30
+        self.pixSize = 100
         
         # user ID
         self.userID = "users/servirmekong/temp/"
@@ -278,7 +278,7 @@ class SurfaceReflectance():
          fmk = img.select("sr_cloud_qa").mask();
         
          logging.info('return mask')
-         return img.updateMask(fmk) ## add .not
+         return img.updateMask(fmk.neq(0)) ## add .not? # changed to neq
         
     def CloudMaskCF(self,img):
          """apply cf-mask Landsat"""  
@@ -293,7 +293,7 @@ class SurfaceReflectance():
         logging.info('return scaled image')
         return scaled
 
-    def  DefringeLandsat(self,img):   
+    def DefringeLandsat(self,img):   
         """remove scanlines from landsat 4 and 7 """
         
         logging.info('removing scanlines')
@@ -324,10 +324,10 @@ class SurfaceReflectance():
 	
 	imgToMask = img.select(selectedBandNamesLandsat)
 			 
-	darkMask = ee.Image(imgToMask.gt(percentilesLow).reduce(ee.Reducer.sum())).eq(0)
-	lightMask = ee.Image(imgToMask.lt(percentilesUp).reduce(ee.Reducer.sum())).eq(0)
+	darkMask = ee.Image(imgToMask.lt(percentilesLow).reduce(ee.Reducer.sum())).eq(0)
+	lightMask = ee.Image(imgToMask.gt(percentilesUp).reduce(ee.Reducer.sum())).eq(0)
 	    
-	return img.updateMask(lightMask).updateMask(lightMask)
+	return img.updateMask(darkMask).updateMask(lightMask)
 
  
     def landsatCloudScore(self,img):
@@ -337,12 +337,13 @@ class SurfaceReflectance():
 
 	logging.info('running landsatCloudscore =' + str(self.env.cloudThreshold))
         
+	score = ee.Image(1.0);
 	# Compute several indicators of cloudiness and take the minimum of them.
         # Clouds are reasonably bright in the blue band.
-        score = score.min(rescale(img, 'img.blue', [0.1, 0.3]));
+        score = score.min(self.rescale(img, 'img.blue', [0.1, 0.3]));
  
         # Clouds are reasonably bright in all visible bands.
-        score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]));
+        score = score.min(self.rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]));
    
         # Clouds are reasonably bright in all infrared bands.
         score = score.min(self.rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]));
@@ -352,14 +353,21 @@ class SurfaceReflectance():
         #score = score.min(rescale(img,'img.temp', [300, 290]));
 
         # However, clouds are not snow.
-        ndsi = img.normalizedDifference(['green', 'swir1']);
-        score =  score.min(rescale(ndsi, 'img', [0.8, 0.6])).multiply(100).byte();
-        score = score.lt(self.env.cloudThresh).rename('cloudMask');
-        
-	loggin.info('finished cloudscore')
+        ndsi = ee.Image(img).normalizedDifference(['green', 'swir1']);
+        score =  score.min(self.rescale(ndsi, 'img', [0.8, 0.6])).multiply(100).byte();
+        #score = score.lt(self.env.cloudThreshold);   
 	
-        return img.updateMask(score);
+	#img = ee.Image(img).updateMask(score) 
+	
+        return score;
  
+ 
+    def rescale(self,img,exp,thresholds):
+	""" A helper to apply an expression and linearly rescale the output.
+	Used in the landsatCloudScore function below. """
+	
+	result = ee.Image(img).expression(exp, {img: img}).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0])
+	return result
  
  
     def ExportToAsset(self,img,assetName):  
