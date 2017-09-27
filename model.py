@@ -326,9 +326,9 @@ class SurfaceReflectance():
 	imgToMask = img.select(selectedBandNamesLandsat)
 			 
 	#darkMask = ee.Image(imgToMask.lt(percentilesLow).reduce(ee.Reducer.sum())).eq(0)
-	lightMask = ee.Image(imgToMask.gt(percentilesUp).reduce(ee.Reducer.sum())) #.eq(0)
+	lightMask = ee.Image(imgToMask.gt(percentilesUp).reduce(ee.Reducer.sum())).eq(0)
 	    
-	return lightMask #img.updateMask(darkMask).updateMask(lightMask)
+	return img.updateMask(lightMask) #img.updateMask(darkMask).updateMask(lightMask)
 
  
     def landsatCloudScore(self,img):
