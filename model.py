@@ -21,8 +21,8 @@ class environment(object):
 	self.timeString = time.strftime("%Y%m%d_%H%M%S")
        
         # set dates
-        self.startYear = 2003;
-        self.endYear = 2004;
+        self.startYear = 2002;
+        self.endYear = 2003;
         self.startJulian = 1;
         self.endJulian = 366;        
         
@@ -35,11 +35,11 @@ class environment(object):
         self.metadataCloudCoverMax = 25
         
         # threshold for landsatCloudScore
-        self.cloudThreshold = 1
+        self.cloudThreshold = 0
         
         # percentiles to filter for bad data
-        self.lowPercentile = 1
-        self.highPercentile = 99
+        self.lowPercentile = 10
+        self.highPercentile = 90
 
         # whether to use imagecolletions
         self.useL4=True
@@ -50,7 +50,7 @@ class environment(object):
         # apply cloud masks
         self.maskSR = True
         self.maskCF = True
-        self.cloudScore = True
+        self.cloudScore = False
 	
         self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','cfmask'])
               
@@ -149,19 +149,19 @@ class SurfaceReflectance():
         # get the images
         collection = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
                
-        outputName = "testmask_percentile1_" + str(self.env.startYear)
+        outputName = "testmask_Percentile_" + str(self.env.startYear)
                 
         # calculate the percentiles
         
         #print percentiles.getInfo()
 	
-        col = collection.map(self.MaskPercentile) 
+        collection = collection.map(self.MaskPercentile) 
 
-	img = ee.Image(col.median())  
+	img = ee.Image(collection.sum())  
 
 	self.ExportToAsset(img,outputName)         
        
-        return  col
+        return collection
         
           
     # Obtain Landsat image collections 
@@ -257,7 +257,7 @@ class SurfaceReflectance():
         
         startDate = ee.Date.fromYMD(1984,1,1)
         endDate = ee.Date.fromYMD(2020,1,1)    
-        cloudCoverMax = 40
+        cloudCoverMax = 30
         
         # get the images
         collection = self.GetLandsat(startDate,endDate,cloudCoverMax)
@@ -267,7 +267,7 @@ class SurfaceReflectance():
         
         logging.info('returning percentiles')
         
-        return collectionPercentile
+        return ee.Image(collectionPercentile)
 
         
     def CloudMaskSR(self,img):
@@ -318,16 +318,17 @@ class SurfaceReflectance():
 	# get the upper and lower band
 	bandsUpper = ee.List(['blue_p' + upper,'green_p'+ upper,'red_p'+ upper,'nir_p'+ upper,'swir1_p'+ upper,'swir2_p'+ upper])
 	bandsLower = ee.List(['blue_p' + lower,'green_p'+ lower,'red_p'+ lower,'nir_p'+ lower,'swir1_p'+ lower,'swir2_p'+ lower])
-	  
-	percentilesUp = ee.Image(self.CalculatePercentiles()).select(bandsUpper,selectedBandNamesLandsat )
-	percentilesLow = ee.Image(self.CalculatePercentiles()).select(bandsLower,selectedBandNamesLandsat )
+	
+	percentile = ee.Image(self.CalculatePercentiles())  
+	percentilesUp = percentile.select(bandsUpper,selectedBandNamesLandsat )
+	percentilesLow = percentile.select(bandsLower,selectedBandNamesLandsat )
 	
 	imgToMask = img.select(selectedBandNamesLandsat)
 			 
-	darkMask = ee.Image(imgToMask.lt(percentilesLow).reduce(ee.Reducer.sum())).eq(0)
-	lightMask = ee.Image(imgToMask.gt(percentilesUp).reduce(ee.Reducer.sum())).eq(0)
+	#darkMask = ee.Image(imgToMask.lt(percentilesLow).reduce(ee.Reducer.sum())).eq(0)
+	lightMask = ee.Image(imgToMask.gt(percentilesUp).reduce(ee.Reducer.sum())) #.eq(0)
 	    
-	return img.updateMask(darkMask).updateMask(lightMask)
+	return lightMask #img.updateMask(darkMask).updateMask(lightMask)
 
  
     def landsatCloudScore(self,img):
@@ -335,40 +336,35 @@ class SurfaceReflectance():
 	This expects the input image to have the common band names: 
 	["red", "blue", etc], so it can work across sensors. """
 
-	logging.info('running landsatCloudscore =' + str(self.env.cloudThreshold))
-        
-	score = ee.Image(1.0);
+	logging.info('running landsatCloudscore = ' + str(self.env.cloudThreshold))
+	
+	img = ee.Image(img)
+      
 	# Compute several indicators of cloudiness and take the minimum of them.
         # Clouds are reasonably bright in the blue band.
-        score = score.min(self.rescale(img, 'img.blue', [0.1, 0.3]));
+
+	thresholds  = [0.075, 0.3]
+	score = ee.Image(img.select("blue").subtract(thresholds[0])).divide(thresholds[1] - thresholds[0])
  
         # Clouds are reasonably bright in all visible bands.
-        score = score.min(self.rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]));
+        #score = score.min(self.rescale(image, 'red', [0.2, 0.8]));
    
+        #image = ee.Image(img.select('nir').add(img.select('swir1')).add(img.select('swir2')))
         # Clouds are reasonably bright in all infrared bands.
-        score = score.min(self.rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]));
+        #score = score.min(self.rescale(image, 'nir', [0.3, 0.8]));
 
         # edit Ate cfmask uses therman band to detect clouds
         # Clouds are reasonably cool in temperature.
         #score = score.min(rescale(img,'img.temp', [300, 290]));
 
         # However, clouds are not snow.
-        ndsi = ee.Image(img).normalizedDifference(['green', 'swir1']);
-        score =  score.min(self.rescale(ndsi, 'img', [0.8, 0.6])).multiply(100).byte();
-        #score = score.lt(self.env.cloudThreshold);   
-	
-	#img = ee.Image(img).updateMask(score) 
-	
-        return score;
+        #ndsi = ee.Image(img).normalizedDifference(['green', 'swir1']);
+        #score =  score.min(self.rescale(ndsi, 'img', [0.8, 0.6])).multiply(100).byte();
+        score = score.lt(self.env.cloudThreshold);   
+		
+        return img.updateMask(score) ;
  
- 
-    def rescale(self,img,exp,thresholds):
-	""" A helper to apply an expression and linearly rescale the output.
-	Used in the landsatCloudScore function below. """
-	
-	result = ee.Image(img).expression(exp, {img: img}).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0])
-	return result
- 
+
  
     def ExportToAsset(self,img,assetName):  
         """export to asset """
