@@ -18,20 +18,22 @@ class environment(object):
         ee.Initialize()
        
         # set dates
-        self.startYear = 1995;
-        self.endYear = 2008;
+        self.startYear = 2003;
+        self.endYear = 2004;
         self.startJulian = 1;
-        self.endJulian = 181;        
+        self.endJulian = 366;        
         
         # set location 
-        self.location = ee.Geometry.Polygon([[[105.91,21.02],[105.910,21.601],[105.1,21.601],[105.1325,21.002],[105.919,21.020]]]) #ee.Geometry.Point([105.809,21.074])
+        self.location = ee.Geometry.Polygon([[[103.294,17.923],[103.294,17.923],[106.453,17.923],[106.453,20.469],[103.2941,20.469],[103.294,17.923]]])
+        
+        #ee.Geometry.Polygon([[[103.91,20.02],[103.910,20.601],[103.1,20.601],[103.1325,20.002],[104.919,20.020]]]) #ee.Geometry.Point([105.809,21.074])
         
         # variable to filter cloud threshold
         self.metadataCloudCoverMax = 25
         
         # percentiles to filter for bad data
-        self.lowPercentile = 15.9
-        self.highPercentile = 84.1
+        self.lowPercentile = 1
+        self.highPercentile = 99
 
         # whether to use imagecolletions
         self.useL4=True
@@ -49,7 +51,7 @@ class environment(object):
         self.defringe = True
         
         # pixel size
-        self.pixSize = 100
+        self.pixSize = 30
         
         # user ID
         self.userID = "users/servirmekong/temp/"
@@ -130,36 +132,42 @@ class SurfaceReflectance():
         
         logging.info('starting the model the model')
         
-        # get the images
-        collection = self.GetLandsat()
+        # construct date objects
+        startDate = ee.Date.fromYMD(self.env.startYear,1,1)
+        endDate = ee.Date.fromYMD(self.env.endYear,1,1)    
         
-        img = ee.Image(collection.median())
-        self.ExportToAsset(img,"test_median1")
+        # get the images
+        collection = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
+        
+       
+        outputName = "testmask3_" + str(self.env.startYear)
+        
         
         # calculate the percentiles
-        #percentiles = self.CalculatePercentiles(collection)
-                   
+        
+        #print percentiles.getInfo()
+         
+        #collection = collection.map(self.MaskPercentile) 
+	img = ee.Image(collection.median())  
+	self.ExportToAsset(img,outputName)         
         #print filteredCollection
         return  collection
         
           
     # Obtain Landsat image collections 
-    def GetLandsat(self):
+    def GetLandsat(self,startDate,endDate,metadataCloudCoverMax):
         """Get the Landsat imagery"""  
         
         logging.info('getting landsat images')
 
-        # construct date objects
-        startDate = ee.Date.fromYMD(self.env.startYear,1,1)
-        endDate = ee.Date.fromYMD(self.env.endYear,1,1)        
-        
+            
         # boolean to merge Landsat; when true is merges with another collection
         merge = False
         
         # landsat4 image collections 
         if self.env.useL4:        
             landsat4 =  ee.ImageCollection('LANDSAT/LT4_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
-            landsat4 = landsat4.filterMetadata('CLOUD_COVER','less_than',self.env.metadataCloudCoverMax)
+            landsat4 = landsat4.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             if self.env.defringe == True:
                  landsat4 =  landsat4.map(self.DefringeLandsat)
             if self.env.maskSR == True:
@@ -173,7 +181,7 @@ class SurfaceReflectance():
         # landsat 5 image collections 
         if self.env.useL5:
             landsat5 =  ee.ImageCollection('LANDSAT/LT5_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
-            landsat5 = landsat5.filterMetadata('CLOUD_COVER','less_than',self.env.metadataCloudCoverMax)
+            landsat5 = landsat5.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             if self.env.defringe == True:
                  landsat5 =  landsat5.map(self.DefringeLandsat)
             if self.env.maskSR == True:
@@ -189,7 +197,7 @@ class SurfaceReflectance():
         # landsat 7 image collections  
         if self.env.useL7:
             landsat7 =  ee.ImageCollection('LANDSAT/LE7_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
-            landsat7 = landsat7.filterMetadata('CLOUD_COVER','less_than',self.env.metadataCloudCoverMax)
+            landsat7 = landsat7.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             if self.env.defringe == True:
                  landsat7 =  landsat7.map(self.DefringeLandsat)            
             if self.env.maskSR == True:
@@ -205,7 +213,7 @@ class SurfaceReflectance():
         # landsat8  image collections 				        
         if self.env.useL8:
             landsat8 =  ee.ImageCollection('LANDSAT/LC8_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
-            landsat8 = landsat8.filterMetadata('CLOUD_COVER','less_than',self.env.metadataCloudCoverMax)
+            landsat8 = landsat8.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             if self.env.defringe == True:
                  landsat8 =  landsat8.map(self.DefringeLandsat)    
             if self.env.maskSR == True:
@@ -228,11 +236,18 @@ class SurfaceReflectance():
         return ee.ImageCollection(landsatCollection)
         
 
-    def CalculatePercentiles(self,collection):
+    def CalculatePercentiles(self):
         """Calculate percentiles to filter imagery"""  
         
         logging.info('calculate percentiles')
         
+        startDate = ee.Date.fromYMD(1984,1,1)
+        endDate = ee.Date.fromYMD(2020,1,1)    
+        cloudCoverMax = 40
+        
+        # get the images
+        collection = self.GetLandsat(startDate,endDate,cloudCoverMax)
+
         # get upper and lower percentile
         collectionPercentile = collection.reduce(ee.Reducer.percentile([self.env.lowPercentile,self.env.highPercentile])) 
         
@@ -275,6 +290,23 @@ class SurfaceReflectance():
         img = img.mask(img.mask().add(sum)) # Check this
         return img
         
+    def MaskPercentile(self,img):
+	"""mask light and dark pixels """
+	logging.info('mask light and dark areas')
+	
+	percentiles = self.CalculatePercentiles()
+		
+	upper = "blue_p" + str(int(self.env.highPercentile))
+	lower = "blue_p" + str(int(self.env.lowPercentile))
+        
+        darkMask = img.gt(percentiles.select(lower))
+	lightMask = img.lt(percentiles.select(upper))
+	
+	return img.updateMask(lightMask).updateMask(darkMask)
+ 
+ 
+ 
+ 
     def ExportToAsset(self,img,assetName):  
         """export to asset """
         
