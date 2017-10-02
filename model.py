@@ -26,10 +26,10 @@ class environment(object):
 	# '2': Rainy: May - Oct (121 - 304)
        
         # set dates
-        self.startYear = 2003;
-        self.endYear = 2003;
-        self.startJulian = 305;
-        self.endJulian = 59;        
+        self.startYear = 2001;
+        self.endYear = 2002;
+        self.startJulian = 1;
+        self.endJulian = 240;        
         
 	
 	# Rainy
@@ -37,19 +37,19 @@ class environment(object):
 	# dry cool
 	
         # set location 
-        self.location = ee.Geometry.Polygon([[[103.294,17.923],[103.294,17.923],[106.453,17.923],[106.453,20.469],[103.2941,20.469],[103.294,17.923]]])
+        #self.location = ee.Geometry.Polygon([[[103.294,17.923],[103.294,17.923],[106.453,17.923],[106.453,20.469],[103.2941,20.469],[103.294,17.923]]])
         
-        #self.location = ee.Geometry.Polygon([[[103.91,20.02],[103.910,20.601],[103.1,20.601],[103.1325,20.002],[104.919,20.020]]]) #ee.Geometry.Point([105.809,21.074])
+        self.location = ee.Geometry.Polygon([[[106.321,20.802],[106.210,20.258],[106.457,20.207],[106.501,20.735],[106.321,20.802]]]) #ee.Geometry.Point([105.809,21.074])
         
         # variable to filter cloud threshold
-        self.metadataCloudCoverMax = 25
+        self.metadataCloudCoverMax = 40
         
         # threshold for landsatCloudScore
         self.cloudThreshold = 0
         
         # percentiles to filter for bad data
-        self.lowPercentile = 10
-        self.highPercentile = 90
+        self.lowPercentile = 20
+        self.highPercentile = 80
 
         # whether to use imagecolletions
         self.useL4=True
@@ -60,7 +60,7 @@ class environment(object):
         # apply cloud masks
         self.maskSR = True
         self.maskCF = True
-        self.cloudScore = False
+        self.cloudScore = True
 	
         self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','cfmask'])
               
@@ -80,7 +80,15 @@ class environment(object):
                                                       'L4' : ee.List([0,1,2,3,4,5,6])})
 
         # threshold for defringing landsat5 and 7
-        self.fringeCountThreshold = 279;                              
+        self.fringeCountThreshold = 279
+
+	#band for TDOM
+	self.shadowSumBands = ['nir','swir1']
+	self.dilatePixels = 5;
+	self.cloudHeights = ee.List.sequence(200,5000,500);
+	self.zScoreThresh = -0.8;
+	self.shadowSumThresh = 0.35;
+
 
         self.k = ee.Kernel.fixed(41, 41, 
                                 [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 
@@ -164,11 +172,24 @@ class SurfaceReflectance():
         # calculate the percentiles
         
         #print percentiles.getInfo()
-	self.percentile = ee.Image(self.CalculatePercentiles())  
+	#self.percentile = ee.Image(self.CalculatePercentiles())  
         
-	collection = collection.map(self.MaskPercentile) 
+	#collection = collection.map(self.MaskPercentile) 
 
+	# Get some pixel-wise stats for the time series
+	self.irStdDev = collection.select(self.env.shadowSumBands).reduce(ee.Reducer.stdDev());
+	self.irMean = collection.select(self.env.shadowSumBands).mean();
+	
+	collection = collection.map(self.simpleTDOM)
+	collection = collection.map(self.cloudProject)
+	
+	
+        count = collection.size();
+        print('counted ' + str(count.getInfo()) +' images');    
+    
 	img = ee.Image(collection.median())  
+	
+	#print(img)
 
 	self.ExportToAsset(img,outputName)         
        
@@ -293,20 +314,20 @@ class SurfaceReflectance():
          fmk = img.select("sr_cloud_qa").mask();
         
          logging.info('return mask')
-         return img.updateMask(fmk.neq(0)) ## add .not? # changed to neq
+         return img.updateMask(fmk.neq(0)).copyProperties(img) ## add .not? # changed to neq
         
     def CloudMaskCF(self,img):
          """apply cf-mask Landsat"""  
         
          fmk = img.select("cfmask").lt(2)
-         return img.updateMask(fmk)
+         return img.updateMask(fmk).copyProperties(img)
 
     def ScaleLandsat(self,img):
         """Landast is scaled by factor 0.0001 """
         
         scaled = ee.Image(img).multiply(0.0001).copyProperties(img,['system:time_start']) 
         logging.info('return scaled image')
-        return scaled
+        return scaled.copyProperties(img)
 
     def DefringeLandsat(self,img):   
         """remove scanlines from landsat 4 and 7 """
@@ -317,7 +338,7 @@ class SurfaceReflectance():
         sum = m.reduceNeighborhood(ee.Reducer.sum(), self.env.k, 'kernel')
         sum = sum.gte(self.env.fringeCountThreshold)        
         img = img.mask(img.mask().add(sum)) # Check this
-        return img
+        return img.copyProperties(img)
         
     def MaskPercentile(self,img):
 	"""mask light and dark pixels """
@@ -342,7 +363,20 @@ class SurfaceReflectance():
 	darkMask = ee.Image(imgToMask.lt(percentilesLow).reduce(ee.Reducer.sum())).eq(0)
 	lightMask = ee.Image(imgToMask.gt(percentilesUp).reduce(ee.Reducer.sum())).eq(0)
 	    
-	return img.updateMask(lightMask).updateMask(darkMask)
+	return img.updateMask(lightMask).updateMask(darkMask).copyProperties(img)
+
+
+    def simpleTDOM(self,img):
+	
+	#Mask out dark dark outliers
+        zScore = img.select(self.env.shadowSumBands).subtract(self.irMean).divide(self.irStdDev)
+        irSum = img.select(self.env.shadowSumBands).reduce(ee.Reducer.sum())
+	TDOMMask = zScore.lt(self.env.zScoreThresh).reduce(ee.Reducer.sum()).eq(2).And(irSum.lt(self.env.shadowSumThresh)).Not()
+	TDOMMask = ee.Image(TDOMMask.focal_min(self.env.dilatePixels)).rename(['TDOMMask'])
+	
+	return img.addBands(TDOMMask)
+  
+
 
  
     def landsatCloudScore(self,img):
@@ -357,7 +391,7 @@ class SurfaceReflectance():
 	# Compute several indicators of cloudiness and take the minimum of them.
         # Clouds are reasonably bright in the blue band.
 	
-	thresholds  = [0.075, 0.3]
+	thresholds  = [0.1, 0.3]
 	score = ee.Image(img.select("blue").subtract(thresholds[0])).divide(thresholds[1] - thresholds[0])
  
 	thresholds  = [0.2, 0.8]
@@ -383,6 +417,64 @@ class SurfaceReflectance():
 		
         return img.updateMask(score) ;
  
+    
+    def cloudProject(self,img):
+	""" Function for wrapping cloud and shadow masking together.
+	    Assumes image has cloud mask band called "cloudMask" and a TDOM mask called  "TDOMMask".
+	    function cloudProject(img,shadowSumThresh,dilatePixels,cloudHeights,
+	    azimuthField,zenithField)
+	"""
+	
+	#Get the cloud mask
+	cloud = img.select('cfmask').lt(0.0002);
+	cloud = cloud.focal_max(self.env.dilatePixels);
+	cloud = cloud.updateMask(cloud);
+      
+	# Get TDOM mask
+	TDOMMask = img.select(['TDOMMask']).Not();
+      
+	# Project the shadow finding pixels inside the TDOM mask that are dark and 
+	# inside the expected area given the solar geometry
+	# Find dark pixels
+	darkPixels = img.select(['nir','swir1','swir2']).reduce(ee.Reducer.sum()).lt(self.env.shadowSumThresh)
+      
+	# Get scale of image
+	nominalScale = cloud.projection().nominalScale();
+
+	# Find where cloud shadows should be based on solar geometry
+	# Convert to radians
+	meanAzimuth = img.get('solar_azimuth_angle');
+	meanZenith = img.get('solar_zenith_angle');
+        
+	azR = ee.Number(meanAzimuth).multiply(3.14).divide(180.0).add(ee.Number(0.5).multiply(3.14 ));
+        zenR = ee.Number(0.5).multiply(3.14).subtract(ee.Number(meanZenith).multiply(3.14).divide(180.0));
+      
+	def cloudHeight(cloudHeight):
+	    cloudHeight = ee.Number(cloudHeight);
+	    shadowCastedDistance = zenR.tan().multiply(cloudHeight); #Distance shadow is cast
+	    x = azR.cos().multiply(shadowCastedDistance).divide(nominalScale).round() #X distance of shadow
+	    y = azR.sin().multiply(shadowCastedDistance).divide(nominalScale).round() #Y distance of shadow
+	    return cloud.changeProj(cloud.projection(), cloud.projection().translate(x, y));
+      
+	# Find the shadows
+	shadows = self.env.cloudHeights.map(cloudHeight)
+
+        shadow = ee.ImageCollection.fromImages(shadows).max();
+     
+	# Create shadow mask
+	shadow = shadow.updateMask(cloud.mask().Not());
+	shadow = shadow.focal_max(self.env.dilatePixels);
+	shadow = shadow.updateMask(darkPixels.And(TDOMMask));
+
+	# Combine the cloud and shadow masks
+	combinedMask = cloud.mask().Or(shadow.mask()).neq(0);
+      
+	# Update the image's mask and return the image
+	img = img.updateMask(combinedMask);
+	img = img.addBands(combinedMask.rename(['cloudShadowMask']));
+		
+	return img;
+
 
  
     def ExportToAsset(self,img,assetName):  
