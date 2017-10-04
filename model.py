@@ -26,10 +26,10 @@ class environment(object):
 	# '2': Rainy: May - Oct (121 - 304)
        
         # set dates
-        self.startYear = 2001;
-        self.endYear = 2002;
-        self.startJulian = 1;
-        self.endJulian = 240;        
+        self.startYear = 2004;
+        self.endYear = 2004;
+        self.startJulian =60;
+        self.endJulian = 181;        
         
 	
 	# Rainy
@@ -37,19 +37,19 @@ class environment(object):
 	# dry cool
 	
         # set location 
-        #self.location = ee.Geometry.Polygon([[[103.294,17.923],[103.294,17.923],[106.453,17.923],[106.453,20.469],[103.2941,20.469],[103.294,17.923]]])
+        self.location = ee.Geometry.Polygon([[[103.294,17.923],[103.294,17.923],[106.453,17.923],[106.453,20.469],[103.2941,20.469],[103.294,17.923]]])
         
-        self.location = ee.Geometry.Polygon([[[106.321,20.802],[106.210,20.258],[106.457,20.207],[106.501,20.735],[106.321,20.802]]]) #ee.Geometry.Point([105.809,21.074])
+        #self.location = ee.Geometry.Polygon([[[106.321,20.802],[106.210,20.258],[106.457,20.207],[106.501,20.735],[106.321,20.802]]]) #ee.Geometry.Point([105.809,21.074])
         
         # variable to filter cloud threshold
-        self.metadataCloudCoverMax = 40
+        self.metadataCloudCoverMax = 100
         
         # threshold for landsatCloudScore
         self.cloudThreshold = 0
         
         # percentiles to filter for bad data
-        self.lowPercentile = 20
-        self.highPercentile = 80
+        self.lowPercentile = 5
+        self.highPercentile = 95
 
         # whether to use imagecolletions
         self.useL4=True
@@ -68,7 +68,7 @@ class environment(object):
         self.defringe = True
         
         # pixel size
-        self.pixSize = 100
+        self.pixSize = 30
         
         # user ID
         self.userID = "users/servirmekong/temp/"
@@ -172,16 +172,16 @@ class SurfaceReflectance():
         # calculate the percentiles
         
         #print percentiles.getInfo()
-	#self.percentile = ee.Image(self.CalculatePercentiles())  
+	self.percentile = ee.Image(self.CalculatePercentiles())  
         
 	#collection = collection.map(self.MaskPercentile) 
 
 	# Get some pixel-wise stats for the time series
-	self.irStdDev = collection.select(self.env.shadowSumBands).reduce(ee.Reducer.stdDev());
-	self.irMean = collection.select(self.env.shadowSumBands).mean();
+	#self.irStdDev = collection.select(self.env.shadowSumBands).reduce(ee.Reducer.stdDev());
+	#self.irMean = collection.select(self.env.shadowSumBands).mean();
 	
-	collection = collection.map(self.simpleTDOM)
-	collection = collection.map(self.cloudProject)
+	#collection = collection.map(self.simpleTDOM)
+	#collection = collection.map(self.cloudProject)
 	
 	
         count = collection.size();
@@ -391,7 +391,7 @@ class SurfaceReflectance():
 	# Compute several indicators of cloudiness and take the minimum of them.
         # Clouds are reasonably bright in the blue band.
 	
-	thresholds  = [0.1, 0.3]
+	thresholds  = [0.07, 0.3]
 	score = ee.Image(img.select("blue").subtract(thresholds[0])).divide(thresholds[1] - thresholds[0])
  
 	thresholds  = [0.2, 0.8]
@@ -400,7 +400,7 @@ class SurfaceReflectance():
         score = score.min(ee.Image(image.subtract(thresholds[0])).divide(thresholds[1] - thresholds[0]))
 	#self.rescale(image, 'red', [0.2, 0.8]));
    
-	thresholds  = [0.2, 0.8]
+	thresholds  = [0.3, 0.8]
         image = ee.Image(img.select('nir').add(img.select('swir1')).add(img.select('swir2')))
         # Clouds are reasonably bright in all infrared bands.
         score = score.min(ee.Image(image.subtract(thresholds[0])).divide(thresholds[1] - thresholds[0]))
