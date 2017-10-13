@@ -29,7 +29,7 @@ class environment(object):
         self.startYear = 2004;
         self.endYear = 2004;
         self.startJulian =60;
-        self.endJulian = 181;        
+        self.endJulian = 120;        
         
 	
 	# Rainy
@@ -39,7 +39,9 @@ class environment(object):
         # set location 
         self.location = ee.Geometry.Polygon([[[103.294,17.923],[103.294,17.923],[106.453,17.923],[106.453,20.469],[103.2941,20.469],[103.294,17.923]]])
         
-        #self.location = ee.Geometry.Polygon([[[106.321,20.802],[106.210,20.258],[106.457,20.207],[106.501,20.735],[106.321,20.802]]]) #ee.Geometry.Point([105.809,21.074])
+        self.location = ee.Geometry.Polygon([[[106.321,20.802],[106.210,20.258],[106.457,20.207],[106.501,20.735],[106.321,20.802]]]) #ee.Geometry.Point([105.809,21.074])
+        self.location = ee.Geometry.Polygon([[[100.810546875,15.199386048559994],[100.87646484375,14.008696370634672],[103.24951171875,13.645986814875332],[103.99658203125,16.172472808397515],[101.62353515625,16.97274101999902],[100.810546875,15.199386048559994]]]) #ee.Geometry.Point([105.809,21.074])
+        #self.location = ee.Geometry.Polygon([[[104.16021199975899,19.23975872471158],[103.96228285797224,18.329898276316065],[104.93086921942609,18.304353250936266],[105.02779295134292,18.819239142504617],[104.81347339419835,19.213817182344677],[104.16021199975899,19.23975872471158]]]) #ee.Geometry.Point([105.809,21.074])
         
         # variable to filter cloud threshold
         self.metadataCloudCoverMax = 100
@@ -59,10 +61,10 @@ class environment(object):
 
         # apply cloud masks
         self.maskSR = True
-        self.maskCF = True
-        self.cloudScore = True
+        self.maskCF = False
+        self.cloudScore = False
 	
-        self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','cfmask'])
+        self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','sr_atmos_opacity','pixel_qa','radsat_qa'])
               
         # apply defringe
         self.defringe = True
@@ -74,10 +76,10 @@ class environment(object):
         self.userID = "users/servirmekong/temp/"
         
         # define the landsat bands
-        self.sensorBandDictLandsatSR = ee.Dictionary({'L8' : ee.List([1,2,3,4,5,6,7]),
-                                                      'L7' : ee.List([0,1,2,3,4,5,6]),
-                                                      'L5' : ee.List([0,1,2,3,4,5,6]),
-                                                      'L4' : ee.List([0,1,2,3,4,5,6])})
+        self.sensorBandDictLandsatSR = ee.Dictionary({'L8' : ee.List([1,2,3,4,5,6,7,8,9]),
+                                                      'L7' : ee.List([0,1,2,3,4,6,7,9,10]),
+                                                      'L5' : ee.List([0,1,2,3,4,6,7,9,10]),
+                                                      'L4' : ee.List([0,1,2,3,4,6,7,9,10])})
 
         # threshold for defringing landsat5 and 7
         self.fringeCountThreshold = 279
@@ -172,7 +174,7 @@ class SurfaceReflectance():
         # calculate the percentiles
         
         #print percentiles.getInfo()
-	self.percentile = ee.Image(self.CalculatePercentiles())  
+	#self.percentile = ee.Image(self.CalculatePercentiles())  
         
 	#collection = collection.map(self.MaskPercentile) 
 
@@ -205,10 +207,10 @@ class SurfaceReflectance():
             
         # boolean to merge Landsat; when true is merges with another collection
         merge = False
-        
+
         # landsat4 image collections 
         if self.env.useL4:        
-            landsat4 =  ee.ImageCollection('LANDSAT/LT4_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
+            landsat4 =  ee.ImageCollection('LANDSAT/LT04/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
             landsat4 = landsat4.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             landsat4 = landsat4.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
             if self.env.defringe == True:
@@ -216,14 +218,15 @@ class SurfaceReflectance():
             if self.env.maskSR == True:
                 landsat4 = landsat4.map(self.CloudMaskSR)
             if self.env.maskSR == True:
-                landsat4 = landsat4.map(self.CloudMaskCF)
+                landsat4 = landsat4.map(self.radSat)
+                landsat4 = landsat4.map(self.maskHaze)
             if not merge:
 		landsatCollection = landsat4.select(self.env.sensorBandDictLandsatSR.get('L4'),self.env.bandNamesLandsat)
 		merge = True
 
         # landsat 5 image collections 
         if self.env.useL5:
-            landsat5 =  ee.ImageCollection('LANDSAT/LT5_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
+            landsat5 =  ee.ImageCollection('LANDSAT/LT05/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
             landsat5 = landsat5.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             landsat5 = landsat5.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
             if self.env.defringe == True:
@@ -231,27 +234,29 @@ class SurfaceReflectance():
             if self.env.maskSR == True:
                 landsat5 = landsat5.map(self.CloudMaskSR)
             if self.env.maskSR == True:
-                landsat5 = landsat5.map(self.CloudMaskCF)
+                landsat5 = landsat5.map(self.radSat)
+                landsat5 = landsat5.map(self.maskHaze)
             if not merge:
 		landsatCollection = landsat5
 		merge = True
             else:
 		landsatCollection = landsatCollection.merge(landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat))
-        
+
         # landsat 7 image collections  
         if self.env.useL7:
-            landsat7 =  ee.ImageCollection('LANDSAT/LE7_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
+            landsat7 =  ee.ImageCollection('LANDSAT/LE07/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
             landsat7 = landsat7.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             landsat7 = landsat7.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
             if self.env.defringe == True:
-                 landsat7 =  landsat7.map(self.DefringeLandsat)            
+		landsat7 =  landsat7.map(self.DefringeLandsat)            
             if self.env.maskSR == True:
-                landsat7 = landsat7.map(self.CloudMaskSR)
+		landsat7 = landsat7.map(self.CloudMaskSR)
             if self.env.maskSR == True:
-                landsat7 = landsat7.map(self.CloudMaskCF)
+                landsat7 = landsat7.map(self.radSat)
+                landsat7 = landsat7.map(self.maskHaze)
             if not merge:
 		landsatCollection = landsat7
-		merge = True
+	    	merge = True
             else:
 		landsatCollection = landsatCollection.merge(landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat))
 
@@ -262,8 +267,8 @@ class SurfaceReflectance():
             landsat8 = landsat8.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
             if self.env.defringe == True:
                  landsat8 =  landsat8.map(self.DefringeLandsat)    
-            if self.env.maskSR == True:
-                landsat8 = landsat8.map(self.CloudMaskCF)            
+            #if self.env.maskSR == True:
+            #    landsat8 = landsat8.map(self.maskHaze)            
             if not merge:
 		landsatCollection = landsat8
 		merge = True
@@ -271,17 +276,18 @@ class SurfaceReflectance():
 		landsatCollection = landsatCollection.merge(landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat))            
        
         count = landsatCollection.size();
-        
+
         
         landsatCollection = landsatCollection.map(self.ScaleLandsat)
         
+
 	if self.env.cloudScore == True:
 	    landsatCollection = landsatCollection.map(self.landsatCloudScore)
 	
        
         logging.info('counted ' + str(count.getInfo()) +' images');           
         logging.info('returning imagecollection')
-        
+
         # return the image collection           
         return ee.ImageCollection(landsatCollection)
         
@@ -305,8 +311,16 @@ class SurfaceReflectance():
         
         return ee.Image(collectionPercentile)
 
+    def maskHaze(self,img):
+         """Apply cloud mask"""  
+       
+         logging.info('Applying SR mask')
         
-    def CloudMaskSR(self,img):
+         fmk = img.select("sr_atmos_opacity").multiply(0.001).lt(0.30)
+         logging.info('return mask')
+         return img.updateMask(fmk).copyProperties(img)
+        
+    def CloudMaskCF(self,img):
          """Apply cloud mask"""  
        
          logging.info('Applying SR mask')
@@ -315,12 +329,23 @@ class SurfaceReflectance():
         
          logging.info('return mask')
          return img.updateMask(fmk.neq(0)).copyProperties(img) ## add .not? # changed to neq
+  
+    def radSat(self,img):
+         """apply cf-mask Landsat""" 
+	 
+	 mask = img.select("radsat_qa").eq(0)
+	        
+         return img.updateMask(mask).copyProperties(img)
         
-    def CloudMaskCF(self,img):
-         """apply cf-mask Landsat"""  
+    def CloudMaskSR(self,img):
+         """apply cf-mask Landsat""" 
+	 
+	 QA = img.select("pixel_qa")
+	 #mask = ee.Image(self.getQABits(QA,3, 5, 'internal_quality_flag')); 
+	 #print mask
         
-         fmk = img.select("cfmask").lt(2)
-         return img.updateMask(fmk).copyProperties(img)
+         return img.updateMask(QA.eq(66)).copyProperties(img)
+         #return img.addBands(mask.select('internal_quality_flag'))
 
     def ScaleLandsat(self,img):
         """Landast is scaled by factor 0.0001 """
@@ -329,16 +354,26 @@ class SurfaceReflectance():
         logging.info('return scaled image')
         return scaled.copyProperties(img)
 
+    # helper function to extract the QA bits
+    def getQABits(self,image, start, end, newName):
+	# Compute the bits we need to extract.
+	pattern = 0;
+	for i in range(start,end,1):
+	    pattern += 2^i
+	    # Return a single band image of the extracted QA bits, giving the banda new name.
+	
+	return image.select([0], [newName]).bitwiseAnd(pattern).rightShift(start)
+
     def DefringeLandsat(self,img):   
         """remove scanlines from landsat 4 and 7 """
         
         logging.info('removing scanlines')
 
-        m = ee.Image(img).select("B1").mask().reduce(ee.Reducer.min())
+        m = ee.Image(img).mask().reduce(ee.Reducer.min())
         sum = m.reduceNeighborhood(ee.Reducer.sum(), self.env.k, 'kernel')
-        sum = sum.gte(self.env.fringeCountThreshold)        
-        img = img.mask(img.mask().add(sum)) # Check this
-        return img.copyProperties(img)
+        mask = sum.gte(self.env.fringeCountThreshold)        
+        #img = img.mask(img.mask().add(sum)) 
+        return img.updateMask(mask)
         
     def MaskPercentile(self,img):
 	"""mask light and dark pixels """
@@ -426,7 +461,7 @@ class SurfaceReflectance():
 	"""
 	
 	#Get the cloud mask
-	cloud = img.select('cfmask').lt(0.0002);
+	cloud = img.select('sr_cloud_qa').lt(0.0002);
 	cloud = cloud.focal_max(self.env.dilatePixels);
 	cloud = cloud.updateMask(cloud);
       
