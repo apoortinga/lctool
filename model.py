@@ -26,8 +26,8 @@ class environment(object):
 	# '2': Rainy: May - Oct (121 - 304)
        
         # set dates
-        self.startYear = 2004;
-        self.endYear = 2004;
+        self.startYear = 2005;
+        self.endYear = 2005;
         self.startJulian =60;
         self.endJulian = 120;        
         
@@ -44,7 +44,7 @@ class environment(object):
         #self.location = ee.Geometry.Polygon([[[104.16021199975899,19.23975872471158],[103.96228285797224,18.329898276316065],[104.93086921942609,18.304353250936266],[105.02779295134292,18.819239142504617],[104.81347339419835,19.213817182344677],[104.16021199975899,19.23975872471158]]]) #ee.Geometry.Point([105.809,21.074])
         
         # variable to filter cloud threshold
-        self.metadataCloudCoverMax = 100
+        self.metadataCloudCoverMax = 70
         
         # threshold for landsatCloudScore
         self.cloudThreshold = 0
@@ -62,7 +62,7 @@ class environment(object):
         # apply cloud masks
         self.maskSR = True
         self.maskCF = False
-        self.cloudScore = False
+        self.cloudScore = True
 	
         self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','sr_atmos_opacity','pixel_qa','radsat_qa'])
               
@@ -306,7 +306,6 @@ class SurfaceReflectance():
 
         # get upper and lower percentile
         collectionPercentile = collection.reduce(ee.Reducer.percentile([self.env.lowPercentile,self.env.highPercentile])) 
-        
         logging.info('returning percentiles')
         
         return ee.Image(collectionPercentile)
@@ -316,7 +315,7 @@ class SurfaceReflectance():
        
          logging.info('Applying SR mask')
         
-         fmk = img.select("sr_atmos_opacity").multiply(0.001).lt(0.30)
+         fmk = img.select("sr_atmos_opacity").multiply(0.001).lt(0.3)
          logging.info('return mask')
          return img.updateMask(fmk).copyProperties(img)
         
@@ -426,10 +425,10 @@ class SurfaceReflectance():
 	# Compute several indicators of cloudiness and take the minimum of them.
         # Clouds are reasonably bright in the blue band.
 	
-	thresholds  = [0.07, 0.3]
+	thresholds  = [0.15, 0.3]
 	score = ee.Image(img.select("blue").subtract(thresholds[0])).divide(thresholds[1] - thresholds[0])
  
-	thresholds  = [0.2, 0.8]
+	thresholds  = [0.125, 0.8]
 	image = img.select("blue").add(img.select("red")).add(img.select("green"))
         # Clouds are reasonably bright in all visible bands.
         score = score.min(ee.Image(image.subtract(thresholds[0])).divide(thresholds[1] - thresholds[0]))
