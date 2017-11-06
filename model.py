@@ -24,51 +24,26 @@ class environment(object):
 	# '0': Dry Cool: Nov - Feb (305 - 59)
 	# '1': Dry Hot: Mar - Apr (60 - 120)
 	# '2': Rainy: May - Oct (121 - 304)
-       
-        # spring 60 - 151
-	# winter 335 - 59
-	# summer 152 -243
-	# autumn 244 - 334
+   
         # set dates
-        self.startYear = 2010;
-        self.endYear = 2010;
-        self.startJulian = 60
-        self.endJulian = 120
+        self.startYear = 2001;
+        self.endYear = 2001;
+        self.startJulian = 182
+        self.endJulian = 304
         
-	self.outputName = "dryhot_" + str(self.startYear) + "_" + str(self.endYear)
+	self.outputName = "rainy_" + str(self.startYear) + "_" + str(self.endYear)
 	# Rainy
 	# dry hot
 	# dry cool
 	
-        # set location 
-        self.location = ee.Geometry.Polygon([[[102.294,16.923],[102.294,16.923],[107.453,16.923],[107.453,20.469],[102.2941,20.469],[102.294,16.923]]])
-        #self.location = ee.Geometry.Polygon([[[104.61181640625,8.492294005440002],[106.083984375,8.405357223339006],[106.78493496537021,9.596984911825013],[107.2265625,10.960967050069678],[104.4580078125,11.284365555853753],[104.61181640625,8.492294005440002]]])
-        
-        #self.location = ee.Geometry.Polygon([[[106.321,20.802],[106.210,20.258],[106.457,20.207],[106.501,20.735],[106.321,20.802]]]) #ee.Geometry.Point([105.809,21.074])
-        #self.location = ee.Geometry.Polygon([[[96.6572265625,9.0],[108.5126953125,9.0],[108.46875,22.853790527082573],[96.8330078125,22.895372853574724],[96.6572265625,9.0]]])
-        #self.location = ee.Geometry.Polygon([[[98.6572265625,14.0],[105.5126953125,14.0],[105.46875,18.853790527082573],[98.8330078125,18.895372853574724],[98.6572265625,14.0]]])
-	
-	#self.location = ee.FeatureCollection("ft:1vTonxuDFs7rBkt02H3ZzFy1SSFsNPhlPlRE15pVr","geometry").geometry().bounds().buffer(10000).getInfo()
-	self.location = ee.Geometry.Polygon([[[96.6572265625,12.0],[108.5126953125,12.0],[108.46875,21.853790527082573],[96.8330078125,21.895372853574724],[96.6572265625,12.0]]])
-
-	#self.location = ee.Geometry.Polygon([[[104.16021199975899,19.23975872471158],[103.96228285797224,18.329898276316065],[104.93086921942609,18.304353250936266],[105.02779295134292,18.819239142504617],[104.81347339419835,19.213817182344677],[104.16021199975899,19.23975872471158]]]) #ee.Geometry.Point([105.809,21.074])
-        
-	
-	# Load Study Area
-	mekongRegion = ee.Geometry.Polygon([[[91.979254,5.429207999999974],[114.664186,5.429207999999974],[114.664186,28.728774000000026],[91.979254,28.728774000000026],[91.979254,5.429207999999974]]])
-	mekongRegion = ee.Geometry.Polygon([[[103.3813,18.730],[108.0395,18.188],[108.4570,23.100],[101.4038,23.705],[103.3813,18.730]]])
-	mekongRegion = ee.Geometry.Polygon([[[91.979254,17.078991000000002],[103.32172,17.078991000000002],[103.32172,28.728774],[91.979254,28.728774],[91.979254,17.078991000000002]]])
-	
-	self.location = mekongRegion 
-	
         # variable to filter cloud threshold
-        self.metadataCloudCoverMax = 60
+        self.metadataCloudCoverMax = 40
         
         # threshold for landsatCloudScore
         self.cloudThreshold = 0
         
         # percentiles to filter for bad data
-        self.lowPercentile = 5
+        self.lowPercentile = 8
         self.highPercentile = 66
 
         # whether to use imagecolletions
@@ -82,9 +57,11 @@ class environment(object):
         self.maskCF = False
         self.cloudScore = False
 	
-        self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','swir2','sr_atmos_opacity','pixel_qa','radsat_qa'])
-              
-        # apply defringe
+        self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','thermal','swir2','sr_atmos_opacity','pixel_qa','radsat_qa'])
+	
+	self.exportBands = ee.List(['blue','green','red','nir','swir1','thermal','swir2'])
+        
+	# apply defringe
         self.defringe = True
         
         # pixel size
@@ -96,20 +73,12 @@ class environment(object):
         
         # define the landsat bands
         self.sensorBandDictLandsatSR = ee.Dictionary({'L8' : ee.List([1,2,3,4,5,6,7,8,9]),
-                                                      'L7' : ee.List([0,1,2,3,4,6,7,9,10]),
-                                                      'L5' : ee.List([0,1,2,3,4,6,7,9,10]),
-                                                      'L4' : ee.List([0,1,2,3,4,6,7,9,10])})
+                                                      'L7' : ee.List([0,1,2,3,4,5,6,7,9,10]),
+                                                      'L5' : ee.List([0,1,2,3,4,5,6,7,9,10]),
+                                                      'L4' : ee.List([0,1,2,3,4,5,6,7,9,10])})
 
         # threshold for defringing landsat5 and 7
         self.fringeCountThreshold = 279
-
-	#band for TDOM
-	self.shadowSumBands = ['nir','swir1']
-	self.dilatePixels = 5;
-	self.cloudHeights = ee.List.sequence(200,5000,500);
-	self.zScoreThresh = -0.8;
-	self.shadowSumThresh = 0.35;
-
 
         self.k = ee.Kernel.fixed(41, 41, 
                                 [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 
@@ -204,20 +173,14 @@ class SurfaceReflectance():
 	img = ee.Image(img.updateMask(mask))
 
 
-
         count = collection.size();
         print('counted ' + str(count.getInfo()) +' images');    
 	
 	for i in range(1,16,1):
 	    img = self.unmaskYears(img,i)    
-	
-	#img = self.addIndices(img)
-	
-	#print(img)
 
 	self.ExportToAsset(img,self.env.outputName)         
-       
-        return collection
+
         
           
     # Obtain Landsat image collections 
@@ -395,12 +358,11 @@ class SurfaceReflectance():
     def ExportToAsset(self,img,assetName):  
         """export to asset """
         
-        outputName = self.env.userID + str(self.env.timeString) + assetName
+        outputName = self.env.userID + assetName
         logging.info('export image to asset: ' + str(outputName))   
 	
 	print outputName
-	img = img.multiply(10000).int16()
-
+	img = img.multiply(10000).int16().select(self.env.exportBands)
                     
         #task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=str(self.env.timeString)+assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
         task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
@@ -479,71 +441,47 @@ class SurfaceReflectance():
 
 
     def unmaskYears(self,img,year):
-	
+	""" Function to unmask nodata withpixels previous year """
 	
 	print "unmasking for year " + str(self.env.startYear-year) 
 	startDate = ee.Date.fromYMD(self.env.startYear-year,1,1)
 	endDate = ee.Date.fromYMD(self.env.endYear-year,12,31)    
 	prev = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
-	prev = prev.map(self.MaskPercentile) 
-	previmg = ee.Image(prev.median())
-	previmg = previmg.mask(previmg.gt(0))
-	img = img.unmask(previmg)
+	if prev.size().getInfo() > 0:
+	    prev = prev.map(self.MaskPercentile) 
+	    previmg = ee.Image(prev.median())
+	    previmg = previmg.mask(previmg.gt(0))
+	    img = img.unmask(previmg)
 	
-	"""
-	print "unmasking for year " + str(self.env.startYear+year) 
-	startDate = ee.Date.fromYMD(self.env.startYear+year,1,1)
-	endDate = ee.Date.fromYMD(self.env.endYear+year,12,31)    
-	prev = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
-	prev = prev.map(self.MaskPercentile) 
-	previmg = ee.Image(prev.median())
-	previmg = previmg.mask(previmg.gt(0))
-	img = img.unmask(previmg)
-	"""
 	
 	return ee.Image(img)
 
-# set bounds
-xmin = 91.979254;
-xmax = 114.664186;
-ymin = 5.429208;
-ymax = 28.728774;
 
-# number of rows and columns
-n = 2;
+    def makeTiles(self):
+	# set bounds
+	xmin = 91.979254;
+	xmax = 114.664186;
+	ymin = 5.429208;
+	ymax = 28.728774;
 
-# x, y distance of one block
-xs = (xmax - xmin) / n
-ys = (ymax - ymin) / n
+	# number of rows and columns
+	n = 2;
 
+	for  i in range(0, n, 1):
+	    for j in range(0, n,1):	# x, y distance of one block
+		xs = (xmax - xmin) / n
+		ys = (ymax - ymin) / n
+		
+		xl = xmin + i * xs;
+		xr = xmin + (i+1) * xs;
+		
+		yt = ymin + (j*ys);
+		yb = ymin + (j+1)*ys;
+		geom =   [[xl, yt], [xl, yb], [xr, yb], [xr, yt]];
 
-for  i in range(0, n, 1):
-    for j in range(0, n,1):
-	xl = xmin + i * xs;
-	xr = xmin + (i+1) * xs;
-	
-	yt = ymin + (j*ys);
-	yb = ymin + (j+1)*ys;
-	geom =   [[xl, yt], [xl, yb], [xr, yb], [xr, yt]];
-
-	col = SurfaceReflectance().RunModel(geom,i,j)
+		col = SurfaceReflectance().RunModel(geom,i,j)
 
         
    
-count = col.size();
-print('Count: ', count.getInfo());
-    
-image = ee.Image(col.first())
-
-
-
-#print(image)
-# create the vizualization parameters
-viz = {'min':0.0, 'max':2000, 'bands':["B3","B2","B1"]};
-# Print the information for an image asset.
-
-
-#import ee.mapclient
-
-# display the map
-#ee.mapclient.addToMap(ee.Image(image),viz)
+if __name__ == "__main__":
+   SurfaceReflectance().makeTiles()
