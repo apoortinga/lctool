@@ -1,13 +1,47 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Sep 25 14:47:06 2017
+ExportLandsatSRComposite.py, SERVIR-Mekong (2017-07-30)
 
-@author: SERVIRWK
+export landsat composites with gapfilling
+________________________________________________________________________________
+
+
+Usage
+------
+
+$ python  model.py {options}
+
+{options} include:
+
+--year (-y)      : required
+                 : year to create the Landsat composite image for
+                 : in format YYYY
+
+--season (-s)    : season to create the Landsat composite image for
+                 : seasons are set for the Mekong region and will need to be \
+                 : changed for other geographic areas
+                 : options are 'drycool', 'dryhot', or 'rainy'
+
+--user (-u)      : user account used to create the composite
+                 : changes the ~/.config/earthengine/credentials file
+                 : dictionary is called to get credentials
+                 : options are servirmekong, servir-mekong, ate, biplov .. default is servir-mekong
+
+Example Usage
+-------------
+
+1) export surface reflectance composite for dryhot season of 2000 to assets:
+
+  $ python model.py -y 2000 -s drycool -u Quyen
+
 """
 
 import ee
 import logging
 import time
+import math
+from usercredentials import addUserCredentials
+import argparse
 
 class environment(object):
     
@@ -16,26 +50,33 @@ class environment(object):
         """Initialize the environment."""   
          
         # Initialize the Earth Engine object, using the authentication credentials.
+		
         ee.Initialize()
        
 	self.timeString = time.strftime("%Y%m%d_%H%M%S")
 
 	# SEASONS:
 	# '0': Dry Cool: Nov - Feb (305 - 59)
-	# '1': Dry Hot: Mar - Apr (60 - 120)
-	# '2': Rainy: May - Oct (121 - 304)
+	# '1': Dry Hot: Mar - Apr (60 - 181)
+	# '2': Rainy: May - Oct (182 - 304)
+   
+	startjulian = {'drycool':305,'dryhot':60,'rainy':182}
+	endjulian = {'drycool':59,'dryhot':181,'rainy':304}
    
         # set dates
-        self.startYear = 2001;
-        self.endYear = 2001;
-        self.startJulian = 182
-        self.endJulian = 304
-        
-	self.outputName = "rainy_" + str(self.startYear) + "_" + str(self.endYear)
-	# Rainy
-	# dry hot
-	# dry cool
+        self.startYear = int(args.year);
+        self.endYear = int(args.year);
+        self.startJulian = startjulian[args.season]
+        self.endJulian = endjulian[args.season]
 	
+	if args.season == 'drycool':
+	    self.startYear = int(args.year)-1
+        
+	self.NgheAn = [[103.876,18.552],[105.806,18.552],[105.806,19.999],[103.876,19.999],[103.876,18.552]]
+      
+	#users/servirmekong/usgs_sr_composites/drycoo
+	self.outputName = args.season + str(self.startYear) + "_" + str(self.endYear)
+
         # variable to filter cloud threshold
         self.metadataCloudCoverMax = 40
         
@@ -49,13 +90,17 @@ class environment(object):
         # whether to use imagecolletions
         self.useL4=True
         self.useL5=True
-        self.useL7=False
+        self.useL7=True
+	self.useL7scanline = False
         self.useL8=True
+
+	# On May 31, 2003 the Scan Line Corrector (SLC) in the ETM+ instrument failed
+	self.l7Failed = ee.Date.fromYMD(2003,5,31)
 
         # apply cloud masks
         self.maskSR = True
-        self.maskCF = False
-        self.cloudScore = False
+
+	self.tcInputBands =  ee.List(['blue','green','red','nir','swir1','swir2'])
 	
         self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','thermal','swir2','sr_atmos_opacity','pixel_qa','radsat_qa'])
 	
@@ -70,6 +115,10 @@ class environment(object):
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
         self.userID = "projects/servir-mekong/temp/"
+        self.userID = "users/servirmekong/usgs_sr_composites/drycool/"
+
+	
+	self.NgheAn = ee.FeatureCollection("ft:1PSNiJhhvK0XQuZOCvE_YOZgqL_yqSHnu4jryDYsl","geometry")
         
         # define the landsat bands
         self.sensorBandDictLandsatSR = ee.Dictionary({'L8' : ee.List([1,2,3,4,5,6,7,8,9]),
@@ -145,10 +194,13 @@ class SurfaceReflectance():
         """Run the SR model"""  
         
 	self.env.location = ee.Geometry.Polygon(geo)
+
+	#self.env.location = ee.Geometry.Polygon([[104.716,18.615],[105.622,18.620],[105.540,19.451],[104.650,19.466],[104.716,18.615]])
 	self.env.outputName = self.env.outputName + str(x) + str(y)
 	 
         logging.info('starting the model the model')
-        
+        	
+	
         # construct date objects
         startDate = ee.Date.fromYMD(self.env.startYear,1,1)
         endDate = ee.Date.fromYMD(self.env.endYear,12,31)    
@@ -172,14 +224,22 @@ class SurfaceReflectance():
 	mask = img.gt(0)
 	img = ee.Image(img.updateMask(mask))
 
-
         count = collection.size();
         print('counted ' + str(count.getInfo()) +' images');    
 	
-	for i in range(1,16,1):
+	for i in range(1,17,1):
 	    img = self.unmaskYears(img,i)    
 
-	self.ExportToAsset(img,self.env.outputName)         
+	for i in range(1,12,1):
+	    img = self.unmaskFutureYears(img,i)    
+	
+	img = img.select(self.env.exportBands)
+
+	img = self.addIndices(img)
+	img = self.getTasseledCap(img,self.env.tcInputBands )
+	img = self.addTCAngles(img)
+
+	#self.ExportToAsset(img,self.env.outputName)         
 
         
           
@@ -188,12 +248,10 @@ class SurfaceReflectance():
         """Get the Landsat imagery"""  
         
         logging.info('getting landsat images')
-
             
         # boolean to merge Landsat; when true is merges with another collection
         merge = False
-	
-	
+		
         # landsat4 image collections 
         if self.env.useL4:        
             landsat4 =  ee.ImageCollection('LANDSAT/LT04/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
@@ -203,9 +261,6 @@ class SurfaceReflectance():
                  landsat4 =  landsat4.map(self.DefringeLandsat)
             if self.env.maskSR == True:
                 landsat4 = landsat4.map(self.CloudMaskSR)
-            #if self.env.maskSR == True:
-            #    landsat4 = landsat4.map(self.radSat)
-            #    landsat4 = landsat4.map(self.maskHaze)
             if not merge:
 		landsatCollection = landsat4.select(self.env.sensorBandDictLandsatSR.get('L4'),self.env.bandNamesLandsat)
 		merge = True
@@ -219,9 +274,6 @@ class SurfaceReflectance():
                  landsat5 =  landsat5.map(self.DefringeLandsat)
             if self.env.maskSR == True:
                 landsat5 = landsat5.map(self.CloudMaskSR)
-            #if self.env.maskSR == True:
-            #    landsat5 = landsat5.map(self.radSat)
-            #    landsat5 = landsat5.map(self.maskHaze)
             if not merge:
 		landsatCollection = landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat)
 		merge = True
@@ -229,23 +281,23 @@ class SurfaceReflectance():
 		landsatCollection = landsatCollection.merge(landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat))
 	
         # landsat 7 image collections  
-	
         if self.env.useL7:
             landsat7 =  ee.ImageCollection('LANDSAT/LE07/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
+	    if self.env.startYear == 2003 or  self.env.endYear == 2003:
+		if self.env.useL7scanline == False:
+		    landsat7 = landsat7.filterDate(startDate,self.env.l7Failed)
             landsat7 = landsat7.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             landsat7 = landsat7.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
-            if self.env.defringe == True:
-		landsat7 =  landsat7.map(self.DefringeLandsat)            
-            if self.env.maskSR == True:
-		landsat7 = landsat7.map(self.CloudMaskSR)
-            #if self.env.maskSR == True:
-            #    landsat7 = landsat7.map(self.radSat)
-            #    landsat7 = landsat7.map(self.maskHaze)
-            if not merge:
-		landsatCollection = landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat)
-	    	merge = True
-            else:
-		landsatCollection = landsatCollection.merge(landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat))
+            if landsat7.size().getInfo() > 0:
+		if self.env.defringe == True:
+		    landsat7 =  landsat7.map(self.DefringeLandsat)            
+		if self.env.maskSR == True:
+		    landsat7 = landsat7.map(self.CloudMaskSR)
+		if not merge:
+		    landsatCollection = landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat)
+		    merge = True
+		else:
+		    landsatCollection = landsatCollection.merge(landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat))
 	"""
         # landsat8  image collections 				        
         if self.env.useL8:
@@ -362,7 +414,7 @@ class SurfaceReflectance():
         logging.info('export image to asset: ' + str(outputName))   
 	
 	print outputName
-	img = img.multiply(10000).int16().select(self.env.exportBands)
+	img = img.multiply(10000).int16()
                     
         #task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=str(self.env.timeString)+assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
         task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
@@ -453,9 +505,22 @@ class SurfaceReflectance():
 	    previmg = previmg.mask(previmg.gt(0))
 	    img = img.unmask(previmg)
 	
-	
 	return ee.Image(img)
 
+    def unmaskFutureYears(self,img,year):
+	""" Function to unmask nodata withpixels future year """
+	
+	print "unmasking for year " + str(self.env.startYear+year) 
+	startDate = ee.Date.fromYMD(self.env.startYear+year,1,1)
+	endDate = ee.Date.fromYMD(self.env.endYear+year,12,31)    
+	prev = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
+	if prev.size().getInfo() > 0:
+	    prev = prev.map(self.MaskPercentile) 
+	    previmg = ee.Image(prev.median())
+	    previmg = previmg.mask(previmg.gt(0))
+	    img = img.unmask(previmg)
+	
+	return ee.Image(img)
 
     def makeTiles(self):
 	# set bounds
@@ -467,8 +532,8 @@ class SurfaceReflectance():
 	# number of rows and columns
 	n = 2;
 
-	for  i in range(0, n, 1):
-	    for j in range(0, n,1):	# x, y distance of one block
+	for  i in range(1, n, 1):
+	    for j in range(1, n,1):	# x, y distance of one block
 		xs = (xmax - xmin) / n
 		ys = (ymax - ymin) / n
 		
@@ -481,7 +546,89 @@ class SurfaceReflectance():
 
 		col = SurfaceReflectance().RunModel(geom,i,j)
 
+    def getTasseledCap(self,img,bands):
+	"""Function to compute the Tasseled Cap transformation and return an image"""
+
+        logging.info('get tasselcap for computed images')
+	
+	coefficients = ee.Array([
+	    [0.3037, 0.2793, 0.4743, 0.5585, 0.5082, 0.1863],
+	    [-0.2848, -0.2435, -0.5436, 0.7243, 0.0840, -0.1800],
+	    [0.1509, 0.1973, 0.3279, 0.3406, -0.7112, -0.4572],
+	    [-0.8242, 0.0849, 0.4392, -0.0580, 0.2012, -0.2768],
+	    [-0.3280, 0.0549, 0.1075, 0.1855, -0.4357, 0.8085],
+	    [0.1084, -0.9022, 0.4120, 0.0573, -0.0251, 0.0238]
+	  ]);
+	
+	# Make an Array Image, with a 1-D Array per pixel.
+	arrayImage1D = img.select(bands).toArray()
+	
+	# Make an Array Image with a 2-D Array per pixel, 6x1.
+	arrayImage2D = arrayImage1D.toArray(1)
+	
+	componentsImage = ee.Image(coefficients).matrixMultiply(arrayImage2D).arrayProject([0]).arrayFlatten([['brightness', 'greenness', 'wetness', 'fourth', 'fifth', 'sixth']]).float();
+  
+	# Get a multi-band image with TC-named bands.
+  	return img.addBands(componentsImage);
+
+
+    def addTCAngles(self,img):
+	""" Function to add Tasseled Cap angles and distances to an image.
+	    Assumes image has bands: 'brightness', 'greenness', and 'wetness'."""
+	
+	logging.info('add tasseled cap angles')
+	
+	# Select brightness, greenness, and wetness bands	
+	brightness = img.select('brightness');
+	greenness = img.select('greenness');
+	wetness = img.select('wetness');
+  
+	# Calculate Tasseled Cap angles and distances
+	tcAngleBG = brightness.atan2(greenness).divide(math.pi).rename(['tcAngleBG']);
+	tcAngleGW = greenness.atan2(wetness).divide(math.pi).rename(['tcAngleGW']);
+	tcAngleBW = brightness.atan2(wetness).divide(math.pi).rename(['tcAngleBW']);
+	tcDistBG = brightness.hypot(greenness).rename(['tcDistBG']);
+	tcDistGW = greenness.hypot(wetness).rename(['tcDistGW']);
+	tcDistBW = brightness.hypot(wetness).rename(['tcDistBW']);
+	
+	img = img.addBands(tcAngleBG).addBands(tcAngleGW).addBands(tcAngleBW).addBands(tcDistBG).addBands(tcDistGW).addBands(tcDistBW);
+	return img;
+
+class Primitives():
+ 
+    def __init__(self):
+        """Initialize the Surfrace Reflectance app."""  
+        
+        # import the log library
+        import logging
+	
+	# get the environment
+        self.env = environment()    
         
    
 if __name__ == "__main__":
-   SurfaceReflectance().makeTiles()
+  
+    # set argument parsing object
+    parser = argparse.ArgumentParser(description="Create Landsat image composites using Google\
+                                                  Earth Engine.")
+   
+    parser.add_argument('--year','-y', type=str,required=True,
+                        help="Year to perform the ats correction and save to asset format in 'YYYY'")
+
+    parser.add_argument('--season','-s', choices=['drycool','dryhot','rainy'],type=str,
+                        help="Season to create composite for, these align with SERVIR-Mekong's seasonal composite times")
+
+    parser.add_argument('--user','-u', type=str, default="servir-mekong",choices=['servir-mekong','servirmekong',"ate","biplov"],
+			help="specify user account to run task")
+
+    args = parser.parse_args() # get arguments  
+  
+    # user account to run task on
+    userName = args.user
+    year = args.year
+    seasons = args.season
+    
+    # create a new file in ~/.config/earthengine/credentials with token of user
+    addUserCredentials(userName)    
+    
+    SurfaceReflectance().makeTiles()
