@@ -115,7 +115,7 @@ class environment(object):
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
         self.userID = "projects/servir-mekong/temp/"
-        self.userID = "users/servirmekong/usgs_sr_composites/drycool/"
+        self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
 
 	
 	self.NgheAn = ee.FeatureCollection("ft:1PSNiJhhvK0XQuZOCvE_YOZgqL_yqSHnu4jryDYsl","geometry")
@@ -239,7 +239,7 @@ class SurfaceReflectance():
 	img = self.getTasseledCap(img,self.env.tcInputBands )
 	img = self.addTCAngles(img)
 
-	#self.ExportToAsset(img,self.env.outputName)         
+	self.ExportToAsset(img,self.env.outputName)         
 
         
           
@@ -532,8 +532,8 @@ class SurfaceReflectance():
 	# number of rows and columns
 	n = 2;
 
-	for  i in range(1, n, 1):
-	    for j in range(1, n,1):	# x, y distance of one block
+	for  i in range(0, n, 1):
+	    for j in range(0, n,1):	# x, y distance of one block
 		xs = (xmax - xmin) / n
 		ys = (ymax - ymin) / n
 		
@@ -618,7 +618,7 @@ if __name__ == "__main__":
     parser.add_argument('--season','-s', choices=['drycool','dryhot','rainy'],type=str,
                         help="Season to create composite for, these align with SERVIR-Mekong's seasonal composite times")
 
-    parser.add_argument('--user','-u', type=str, default="servir-mekong",choices=['servir-mekong','servirmekong',"ate","biplov"],
+    parser.add_argument('--user','-u', type=str, default="servir-mekong",choices=['servir-mekong','servirmekong',"ate","biplov","quyen"],
 			help="specify user account to run task")
 
     args = parser.parse_args() # get arguments  
