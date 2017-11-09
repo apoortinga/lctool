@@ -74,7 +74,11 @@ class environment(object):
         
 	self.NgheAn = [[103.876,18.552],[105.806,18.552],[105.806,19.999],[103.876,19.999],[103.876,18.552]]
       
-	#users/servirmekong/usgs_sr_composites/drycoo
+        collectionName = "projects/servir-mekong/usgs_sr_composites/" + args.season 
+        self.collection = ee.ImageCollection(collectionName)
+	
+	
+	#users/servirmekong/usgs_sr_composites/drycool
 	self.outputName = args.season + str(self.startYear) + "_" + str(self.endYear)
 
         # variable to filter cloud threshold
@@ -84,8 +88,8 @@ class environment(object):
         self.cloudThreshold = 0
         
         # percentiles to filter for bad data
-        self.lowPercentile = 8
-        self.highPercentile = 66
+        self.lowPercentile = 5
+        self.highPercentile = 85
 
         # whether to use imagecolletions
         self.useL4=True
@@ -103,8 +107,10 @@ class environment(object):
 	self.tcInputBands =  ee.List(['blue','green','red','nir','swir1','swir2'])
 	
         self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','thermal','swir2','sr_atmos_opacity','pixel_qa','radsat_qa'])
+       
 	
 	self.exportBands = ee.List(['blue','green','red','nir','swir1','thermal','swir2'])
+	self.divideBands = ee.List(['blue','green','red','nir','swir1','swir2'])
         
 	# apply defringe
         self.defringe = True
@@ -114,12 +120,10 @@ class environment(object):
         
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
-        self.userID = "projects/servir-mekong/temp/"
-        self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
+        self.userID = "users/servirmekong/temp/"
+        #self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
 
-	
-	self.NgheAn = ee.FeatureCollection("ft:1PSNiJhhvK0XQuZOCvE_YOZgqL_yqSHnu4jryDYsl","geometry")
-        
+       
         # define the landsat bands
         self.sensorBandDictLandsatSR = ee.Dictionary({'L8' : ee.List([1,2,3,4,5,6,7,8,9]),
                                                       'L7' : ee.List([0,1,2,3,4,5,6,7,9,10]),
@@ -193,15 +197,16 @@ class SurfaceReflectance():
     def RunModel(self,geo,x,y):
         """Run the SR model"""  
         
-	self.env.location = ee.Geometry.Polygon(geo)
+	self.env.location = ee.Geometry.Polygon(self.env.NgheAn) #ee.Geometry.Polygon(geo)
 
 	#self.env.location = ee.Geometry.Polygon([[104.716,18.615],[105.622,18.620],[105.540,19.451],[104.650,19.466],[104.716,18.615]])
 	self.env.outputName = self.env.outputName + str(x) + str(y)
 	 
         logging.info('starting the model the model')
         	
-	
-        # construct date objects
+	print self.env.startJulian, self.env.endJulian
+   
+	# construct date objects
         startDate = ee.Date.fromYMD(self.env.startYear,1,1)
         endDate = ee.Date.fromYMD(self.env.endYear,12,31)    
         
@@ -213,7 +218,7 @@ class SurfaceReflectance():
         collection = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
         	
         # calculate the percentiles
-        
+
         #print percentiles.getInfo()
 	self.percentile = ee.Image(self.CalculatePercentiles())  
 	
@@ -221,25 +226,42 @@ class SurfaceReflectance():
         
 	collection = collection.map(self.MaskPercentile) 
 	img = ee.Image(collection.median())
-	mask = img.gt(0)
-	img = ee.Image(img.updateMask(mask))
+	#mask = img.gt(0)
+	#img = ee.Image(img.updateMask(mask))
+	
 
         count = collection.size();
         print('counted ' + str(count.getInfo()) +' images');    
 	
-	for i in range(1,17,1):
-	    img = self.unmaskYears(img,i)    
-
-	for i in range(1,12,1):
-	    img = self.unmaskFutureYears(img,i)    
+	startDate = ee.Date.fromYMD(self.env.startYear-1,1,1)
+        endDate = ee.Date.fromYMD(self.env.endYear-1,12,31)   
 	
-	img = img.select(self.env.exportBands)
+	#img = img.select(self.env.exportBands)
 
 	img = self.addIndices(img)
 	img = self.getTasseledCap(img,self.env.tcInputBands )
 	img = self.addTCAngles(img)
+		
+	img = self.reScaleLandsat(img)
 
-	self.ExportToAsset(img,self.env.outputName)         
+	
+	
+	previousAssemblage = ee.Image(self.env.collection.filterDate(startDate,endDate).mosaic())
+	
+	print previousAssemblage.bandNames().getInfo()
+
+	
+	img = ee.Image(img).unmask(previousAssemblage)
+	print ee.Image(img).bandNames().getInfo()
+	#for i in range(1,17,1):
+	#    img = self.unmaskYears(img,i)    
+
+	#for i in range(1,12,1):
+	#    img = self.unmaskFutureYears(img,i)    
+	
+
+	self.ExportToAsset(img,self.env.outputName)
+
 
         
           
@@ -315,9 +337,9 @@ class SurfaceReflectance():
 		landsatCollection = landsatCollection.merge(landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat))            
         """
         count = landsatCollection.size();
-
+	
         landsatCollection = landsatCollection.map(self.ScaleLandsat)        
-       
+	       
         logging.info('counted ' + str(count.getInfo()) +' images');           
         logging.info('returning imagecollection')
 
@@ -357,10 +379,26 @@ class SurfaceReflectance():
     def ScaleLandsat(self,img):
         """Landast is scaled by factor 0.0001 """
         
-        scaled = ee.Image(img).multiply(0.0001).copyProperties(img,['system:time_start']) 
-        logging.info('return scaled image')
-        return scaled.copyProperties(img)
+	thermal = ee.Image(img).select(ee.List(['thermal']))
+        scaled = ee.Image(img).select(self.env.divideBands).multiply(0.0001)
+	image = ee.Image(scaled.addBands(thermal))
+    
+	logging.info('return scaled image')
+        return image.copyProperties(img)
 
+    def reScaleLandsat(self,img):
+        """Landast is scaled by factor 0.0001 """
+        
+	thermalBand = ee.List(['thermal'])
+	thermal = ee.Image(img).select(thermalBand)
+	
+	otherBands = ee.Image(img).bandNames().removeAll(thermalBand)
+        scaled = ee.Image(img).select(otherBands).divide(0.0001)
+	
+	image = ee.Image(scaled.addBands(thermal))
+        logging.info('return scaled image')
+        
+	return image.copyProperties(img)
 
     def DefringeLandsat(self,img):   
         """remove scanlines from landsat 4 and 7 """
@@ -413,14 +451,23 @@ class SurfaceReflectance():
         outputName = self.env.userID + assetName
         logging.info('export image to asset: ' + str(outputName))   
 	
-	print outputName
-	img = img.multiply(10000).int16()
-                    
+        startDate = ee.Date.fromYMD(self.env.startYear,1,1)
+        endDate = ee.Date.fromYMD(self.env.endYear,12,31)    
+
+	image = ee.Image(img).set({'system:time_start':startDate.millis(), \
+				    'startyear':self.env.startYear, \
+			            'endyear':self.env.endYear, \
+			            'startJulian':self.env.startJulian, \
+		                    'endJulian':self.env.endJulian,
+				    'source':'USGS SR',\
+				    'version':'1.0'}) 
+	
+        
         #task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=str(self.env.timeString)+assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
-        task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
+        task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(image), description=assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
         
         # start task
-        task_ordered.start()
+        task_ordered.start() 
     
     def addIndices(self,img):
 	""" Function to add common (and less common) spectral indices to an image.
@@ -629,6 +676,7 @@ if __name__ == "__main__":
     seasons = args.season
     
     # create a new file in ~/.config/earthengine/credentials with token of user
-    addUserCredentials(userName)    
-    
-    SurfaceReflectance().makeTiles()
+    addUserCredentials(userName)
+    geom = ''    
+    SurfaceReflectance().RunModel(geom,1,1)
+    #SurfaceReflectance().makeTiles()
