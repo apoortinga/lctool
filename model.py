@@ -124,7 +124,7 @@ class environment(object):
         
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
-        self.userID = "users/servirmekong/temp/3"
+        self.userID = "users/servirmekong/temp/4"
         #self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
 
        
@@ -234,11 +234,13 @@ class SurfaceReflectance():
 
 
 	# get upper and lower percentile
-        #self.percentile = fullCollection.reduce(ee.Reducer.percentile([self.env.lowPercentile,self.env.highPercentile])) 
-	#collection = collection.map(self.MaskPercentile) 
+        self.percentile = fullCollection.reduce(ee.Reducer.percentile([self.env.lowPercentile,self.env.highPercentile])) 
+	collection = collection.map(self.MaskPercentile) 
 	img = ee.Image(collection.median())
-	#mask = img.gt(0)
-	#img = ee.Image(img.updateMask(mask))
+	
+	# mask all negative values
+	mask = img.gt(0)
+	img = ee.Image(img.updateMask(mask))
 	
 
         count = collection.size();
@@ -257,13 +259,14 @@ class SurfaceReflectance():
 
 	
 	
-	#previousAssemblage = ee.Image(self.env.collection.filterDate(startDate,endDate).mosaic())
+	previousAssemblage = ee.Image(self.env.collection.filterDate(startDate,endDate).mosaic())
 	
-	#print previousAssemblage.bandNames().getInfo()
+	print previousAssemblage.bandNames().getInfo()
 
 	
-	#img = ee.Image(img).unmask(previousAssemblage)
-	#print ee.Image(img).bandNames().getInfo()
+	img = ee.Image(img).unmask(previousAssemblage)
+	print ee.Image(img).bandNames().getInfo()
+	
 	#for i in range(1,17,1):
 	#    img = self.unmaskYears(img,i)    
 
