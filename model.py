@@ -124,7 +124,7 @@ class environment(object):
         
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
-        self.userID = "users/servirmekong/temp/4"
+        self.userID = "users/servirmekong/temp/SR"
         #self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
 
        
@@ -201,7 +201,7 @@ class SurfaceReflectance():
     def RunModel(self,geo,x,y):
         """Run the SR model"""  
         
-	self.env.location = ee.Geometry.Polygon(self.env.NgheAn) #ee.Geometry.Polygon(geo)
+	self.env.location = ee.Geometry.Polygon(geo) #ee.Geometry.Polygon(self.env.NgheAn)
 
 	#self.env.location = ee.Geometry.Polygon([[104.716,18.615],[105.622,18.620],[105.540,19.451],[104.650,19.466],[104.716,18.615]])
 	self.env.outputName = self.env.outputName + str(x) + str(y)
@@ -251,28 +251,29 @@ class SurfaceReflectance():
 	
 	#img = img.select(self.env.exportBands)
 
-	img = self.addIndices(img)
-	img = self.getTasseledCap(img,self.env.tcInputBands )
-	img = self.addTCAngles(img)
+	#img = self.addIndices(img)
+	#img = self.getTasseledCap(img,self.env.tcInputBands )
+	#img = self.addTCAngles(img)
 		
-	img = self.reScaleLandsat(img)
+
 
 	
 	
-	previousAssemblage = ee.Image(self.env.collection.filterDate(startDate,endDate).mosaic())
+	#previousAssemblage = ee.Image(self.env.collection.filterDate(startDate,endDate).mosaic())
 	
-	print previousAssemblage.bandNames().getInfo()
+	#print previousAssemblage.bandNames().getInfo()
 
 	
-	img = ee.Image(img).unmask(previousAssemblage)
-	print ee.Image(img).bandNames().getInfo()
+	#img = ee.Image(img).unmask(previousAssemblage)
+	#print ee.Image(img).bandNames().getInfo()
 	
-	#for i in range(1,17,1):
-	#    img = self.unmaskYears(img,i)    
+	for i in range(1,17,1):
+	    img = self.unmaskYears(img,i)    
 
-	#for i in range(1,12,1):
-	#    img = self.unmaskFutureYears(img,i)    
+	for i in range(1,12,1):
+	    img = self.unmaskFutureYears(img,i)    
 	
+	img = ee.Image(self.reScaleLandsat(img))
 
 	self.ExportToAsset(img,self.env.outputName)
 
@@ -699,5 +700,5 @@ if __name__ == "__main__":
     # create a new file in ~/.config/earthengine/credentials with token of user
     addUserCredentials(userName)
     geom = ''    
-    SurfaceReflectance().RunModel(geom,1,1)
-    #SurfaceReflectance().makeTiles()
+    #SurfaceReflectance().RunModel(geom,1,1)
+    SurfaceReflectance().makeTiles()
