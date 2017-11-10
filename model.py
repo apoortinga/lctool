@@ -120,7 +120,7 @@ class environment(object):
         
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
-        self.userID = "users/servirmekong/temp/1"
+        self.userID = "users/servirmekong/temp/2"
         #self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
 
        
@@ -384,7 +384,7 @@ class SurfaceReflectance():
 	image = ee.Image(scaled.addBands(thermal))
     
 	logging.info('return scaled image')
-        return ee.Image(image.copyProperties(img)).int16()
+        return ee.Image(image.copyProperties(img))
 
     def reScaleLandsat(self,img):
         """Landast is scaled by factor 0.0001 """
@@ -395,7 +395,7 @@ class SurfaceReflectance():
 	otherBands = ee.Image(img).bandNames().removeAll(thermalBand)
         scaled = ee.Image(img).select(otherBands).divide(0.0001)
 	
-	image = ee.Image(scaled.addBands(thermal))
+	image = ee.Image(scaled.addBands(thermal)).int16()
         logging.info('return scaled image')
         
 	return image.copyProperties(img)
