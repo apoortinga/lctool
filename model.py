@@ -77,6 +77,10 @@ class environment(object):
         collectionName = "projects/servir-mekong/usgs_sr_composites/" + args.season 
         self.collection = ee.ImageCollection(collectionName)
 	
+	self.shadowSumBands = ['nir','swir1'];
+	self.zScoreThresh = -0.8
+	self.shadowSumThresh = 0.35;
+	self.dilatePixels = 2
 	
 	#users/servirmekong/usgs_sr_composites/drycool
 	self.outputName = args.season + str(self.startYear) + "_" + str(self.endYear)
@@ -120,7 +124,7 @@ class environment(object):
         
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
-        self.userID = "users/servirmekong/temp/2"
+        self.userID = "users/servirmekong/temp/3"
         #self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
 
        
@@ -220,11 +224,18 @@ class SurfaceReflectance():
         # calculate the percentiles
 
         #print percentiles.getInfo()
-	self.percentile = ee.Image(self.CalculatePercentiles())  
+	fullCollection = self.returnCollection()  
 	
-	#print self.percentile.bandNames()
-        
-	collection = collection.map(self.MaskPercentile) 
+	# Get some pixel-wise stats for the time series
+	self.irStdDev = ee.Image(fullCollection.select(self.env.shadowSumBands).reduce(ee.Reducer.stdDev()))
+	self.irMean = ee.ImageCollection(fullCollection.select(self.env.shadowSumBands)).mean()
+	
+	collection = collection.map(self.simpleTDOM2)
+
+
+	# get upper and lower percentile
+        #self.percentile = fullCollection.reduce(ee.Reducer.percentile([self.env.lowPercentile,self.env.highPercentile])) 
+	#collection = collection.map(self.MaskPercentile) 
 	img = ee.Image(collection.median())
 	#mask = img.gt(0)
 	#img = ee.Image(img.updateMask(mask))
@@ -246,13 +257,13 @@ class SurfaceReflectance():
 
 	
 	
-	previousAssemblage = ee.Image(self.env.collection.filterDate(startDate,endDate).mosaic())
+	#previousAssemblage = ee.Image(self.env.collection.filterDate(startDate,endDate).mosaic())
 	
-	print previousAssemblage.bandNames().getInfo()
+	#print previousAssemblage.bandNames().getInfo()
 
 	
-	img = ee.Image(img).unmask(previousAssemblage)
-	print ee.Image(img).bandNames().getInfo()
+	#img = ee.Image(img).unmask(previousAssemblage)
+	#print ee.Image(img).bandNames().getInfo()
 	#for i in range(1,17,1):
 	#    img = self.unmaskYears(img,i)    
 
@@ -347,7 +358,7 @@ class SurfaceReflectance():
         return ee.ImageCollection(landsatCollection)
        
 
-    def CalculatePercentiles(self):
+    def returnCollection(self):
         """Calculate percentiles to filter imagery"""  
         
         logging.info('calculate percentiles')
@@ -358,13 +369,8 @@ class SurfaceReflectance():
         
         # get the images
         collection = self.GetLandsat(startDate,endDate,cloudCoverMax)
-
-        # get upper and lower percentile
-        collectionPercentile = collection.reduce(ee.Reducer.percentile([self.env.lowPercentile,self.env.highPercentile])) 
-	#print collectionPercentile.bandNames().getInfo()
-        logging.info('returning percentiles')
-        
-        return ee.Image(collectionPercentile)
+	
+	return collection
        
     def CloudMaskSR(self,img):
          """apply cf-mask Landsat""" 
@@ -444,6 +450,18 @@ class SurfaceReflectance():
 	    
 	return img
 
+
+    def simpleTDOM2(self,img):
+	""" Function for finding dark outliers in time series.
+	Original concept written by Carson Stam and adapted by Ian Housman.
+	Adds a band that is a mask of pixels that are dark, and dark outliers."""
+ 
+	zScore = img.select(self.env.shadowSumBands).subtract(self.irMean).divide(self.irStdDev);
+	irSum = img.select(self.env.shadowSumBands).reduce(ee.Reducer.sum());
+	TDOMMask = zScore.lt(self.env.zScoreThresh).reduce(ee.Reducer.sum()).eq(2).And(irSum.lt(self.env.shadowSumThresh)).Not();
+	TDOMMask = TDOMMask.focal_min(self.env.dilatePixels);
+	
+	return img.updateMask(TDOMMask);
 
     def ExportToAsset(self,img,assetName):  
         """export to asset """
