@@ -75,6 +75,10 @@ class environment(object):
 	self.NgheAn = [[103.876,18.552],[105.806,18.552],[105.806,19.999],[103.876,19.999],[103.876,18.552]]
       
         collectionName = "projects/servir-mekong/usgs_sr_composites/" + args.season 
+	
+	self.mekongRegion = ee.FeatureCollection('ft:1LEGeqwlBCAlN61ie5ol24NdUDqB1MgpFR_sJNWQJ')
+
+	
         self.collection = ee.ImageCollection(collectionName)
 	
 	self.shadowSumBands = ['nir','swir1'];
@@ -86,14 +90,14 @@ class environment(object):
 	self.outputName = args.season + str(self.startYear) + "_" + str(self.endYear)
 
         # variable to filter cloud threshold
-        self.metadataCloudCoverMax = 40
+        self.metadataCloudCoverMax = 50
         
         # threshold for landsatCloudScore
-        self.cloudThreshold = 0
+        self.cloudThreshold = 20
         
         # percentiles to filter for bad data
         self.lowPercentile = 5
-        self.highPercentile = 85
+        self.highPercentile = 80
 
         # whether to use imagecolletions
         self.useL4=True
@@ -124,7 +128,7 @@ class environment(object):
         
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
-        self.userID = "users/servirmekong/temp/SR"
+        self.userID = "users/servirmekong/temp/8SurfacReflectance"
         #self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
 
        
@@ -202,6 +206,7 @@ class SurfaceReflectance():
         """Run the SR model"""  
         
 	self.env.location = ee.Geometry.Polygon(geo) #ee.Geometry.Polygon(self.env.NgheAn)
+	#self.env.location = ee.Geometry.Polygon(self.env.NgheAn)
 
 	#self.env.location = ee.Geometry.Polygon([[104.716,18.615],[105.622,18.620],[105.540,19.451],[104.650,19.466],[104.716,18.615]])
 	self.env.outputName = self.env.outputName + str(x) + str(y)
@@ -354,6 +359,7 @@ class SurfaceReflectance():
         count = landsatCollection.size();
 	
         landsatCollection = landsatCollection.map(self.ScaleLandsat)        
+        landsatCollection = landsatCollection.map(self.landsatCloudScore)        
 	       
         logging.info('counted ' + str(count.getInfo()) +' images');           
         logging.info('returning imagecollection')
@@ -389,7 +395,7 @@ class SurfaceReflectance():
     def ScaleLandsat(self,img):
         """Landast is scaled by factor 0.0001 """
         
-	thermal = ee.Image(img).select(ee.List(['thermal']))
+	thermal = ee.Image(img).select(ee.List(['thermal'])).multiply(0.1)
         scaled = ee.Image(img).select(self.env.divideBands).multiply(0.0001)
 	image = ee.Image(scaled.addBands(thermal))
     
@@ -400,7 +406,7 @@ class SurfaceReflectance():
         """Landast is scaled by factor 0.0001 """
         
 	thermalBand = ee.List(['thermal'])
-	thermal = ee.Image(img).select(thermalBand)
+	thermal = ee.Image(img).select(thermalBand).multiply(10)
 	
 	otherBands = ee.Image(img).bandNames().removeAll(thermalBand)
         scaled = ee.Image(img).select(otherBands).divide(0.0001)
@@ -455,6 +461,42 @@ class SurfaceReflectance():
 	return img
 
 
+    def rescale(self,img, exp, thresholds):
+	""" A helper to apply an expression and linearly rescale the output.
+	    Used in the landsatCloudScore function below."""
+	#image = ee.Image(img).expression(exp, {img: img}) #.subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+	image = ee.Image(img).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+	return ee.Image(image)
+
+
+    def landsatCloudScore(self,img):
+	""" Compute a cloud score and adds a band that represents the cloud mask.  
+	    This expects the input image to have the common band names: 
+	    ["red", "blue", etc], so it can work across sensors. """
+	
+	# Compute several indicators of cloudiness and take the minimum of them.
+	score = ee.Image(1.0);
+	#Clouds are reasonably bright in the blue band.
+	score = ee.Image(score.min(self.rescale(img, 'img.blue', [0.1, 0.3])));
+ 
+	# Clouds are reasonably bright in all visible bands.
+	score = ee.Image(score.min(self.rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8])));
+   
+	# Clouds are reasonably bright in all infrared bands.
+	score = ee.Image(score.min(self.rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8])));
+
+	# Clouds are reasonably cool in temperature.
+	score = ee.Image(score.min(self.rescale(img,'img.temp', [300, 290])));
+
+	# However, clouds are not snow.
+	ndsi = ee.Image(img).normalizedDifference(['green', 'swir1']);
+	score =  ee.Image(score.min(self.rescale(ndsi, 'img', [0.8, 0.6])).multiply(100).byte());
+	score = ee.Image(score.lt(self.env.cloudThreshold));
+	image = ee.Image(img).updateMask(score);
+	
+	return ee.Image(image).copyProperties(img)
+
+
     def simpleTDOM2(self,img):
 	""" Function for finding dark outliers in time series.
 	Original concept written by Carson Stam and adapted by Ian Housman.
@@ -482,7 +524,7 @@ class SurfaceReflectance():
 			            'startJulian':self.env.startJulian, \
 		                    'endJulian':self.env.endJulian,
 				    'source':'USGS SR',\
-				    'version':'1.0'}) 
+				    'version':'1.0'}).clip(self.env.mekongRegion) 
 	
         
         #task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=str(self.env.timeString)+assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
