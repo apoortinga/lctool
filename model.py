@@ -73,7 +73,7 @@ class environment(object):
 	    self.startYear = int(args.year)-1
         
 	self.NgheAn = [[103.876,18.552],[105.806,18.552],[105.806,19.999],[103.876,19.999],[103.876,18.552]]
-      
+	
         collectionName = "projects/servir-mekong/usgs_sr_composites/" + args.season 
 	
 	self.mekongRegion = ee.FeatureCollection('ft:1LEGeqwlBCAlN61ie5ol24NdUDqB1MgpFR_sJNWQJ')
@@ -81,6 +81,9 @@ class environment(object):
 	
         self.collection = ee.ImageCollection(collectionName)
 	
+	# variables for the tdom filter
+	self.applyTDOM = True
+	self.TDOMyears = 10
 	self.shadowSumBands = ['nir','swir1'];
 	self.zScoreThresh = -0.8
 	self.shadowSumThresh = 0.35;
@@ -90,14 +93,17 @@ class environment(object):
 	self.outputName = args.season + str(self.startYear) + "_" + str(self.endYear)
 
         # variable to filter cloud threshold
-        self.metadataCloudCoverMax = 50
+        self.metadataCloudCoverMax = 70
         
         # threshold for landsatCloudScore
-        self.cloudThreshold = 20
+        self.cloudThreshold = 1
         
+	# apply a filter to filter for high values
+	self.filterPercentile = True
+	self.filterPercentileYears = 10
         # percentiles to filter for bad data
-        self.lowPercentile = 5
-        self.highPercentile = 80
+        self.lowPercentile = 1
+        self.highPercentile = 66
 
         # whether to use imagecolletions
         self.useL4=True
@@ -112,12 +118,22 @@ class environment(object):
         # apply cloud masks
         self.maskSR = True
 
+	# get indicices 
+	self.getIndices = False
+	self.calcIndices = False
+	self.calcTasselcap = False
+	self.calcTCangles = False
+
+	# bands for tasselcap !maybe move
 	self.tcInputBands =  ee.List(['blue','green','red','nir','swir1','swir2'])
-	
-        self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','thermal','swir2','sr_atmos_opacity','pixel_qa','radsat_qa'])
-       
-	
+        
+	# bands to select
+	self.bandNamesLandsat = ee.List(['blue','green','red','nir','swir1','thermal','swir2','sr_atmos_opacity','pixel_qa','radsat_qa'])
+        
+	# bands for export
 	self.exportBands = ee.List(['blue','green','red','nir','swir1','thermal','swir2'])
+	
+	# bands for dividing
 	self.divideBands = ee.List(['blue','green','red','nir','swir1','swir2'])
         
 	# apply defringe
@@ -128,15 +144,24 @@ class environment(object):
         
         # user ID
         #self.userID = "users/servirmekong/assemblage/"
-        self.userID = "users/servirmekong/temp/8SurfacReflectance"
+        self.userID = "users/servirmekong/temp/1NAmedoid_SurfacReflectance"
         #self.userID = "projects/servir-mekong/usgs_sr_composites/" + args.season + "/" 
+        self.userID = "projects/servir-mekong/temp/" + args.season 
 
        
-        # define the landsat bands
-        self.sensorBandDictLandsatSR = ee.Dictionary({'L8' : ee.List([1,2,3,4,5,6,7,8,9]),
+        # define the landsat bands			           
+        self.sensorBandDictLandsatSR = ee.Dictionary({'L8' : ee.List([1,2,3,4,5,7,6,9,10,11]),
                                                       'L7' : ee.List([0,1,2,3,4,5,6,7,9,10]),
                                                       'L5' : ee.List([0,1,2,3,4,5,6,7,9,10]),
                                                       'L4' : ee.List([0,1,2,3,4,5,6,7,9,10])})
+
+	# just placeholders for now
+	self.calcMedoid = True
+	self.calcMedian = False
+	self.calcMean = False
+
+	self.fillGaps = True
+	self.fillGapYears = 15
 
         # threshold for defringing landsat5 and 7
         self.fringeCountThreshold = 279
@@ -205,11 +230,11 @@ class SurfaceReflectance():
     def RunModel(self,geo,x,y):
         """Run the SR model"""  
         
-	self.env.location = ee.Geometry.Polygon(geo) #ee.Geometry.Polygon(self.env.NgheAn)
+	#self.env.location = ee.Geometry.Polygon(geo) #ee.Geometry.Polygon(self.env.NgheAn)
 	#self.env.location = ee.Geometry.Polygon(self.env.NgheAn)
 
-	#self.env.location = ee.Geometry.Polygon([[104.716,18.615],[105.622,18.620],[105.540,19.451],[104.650,19.466],[104.716,18.615]])
-	self.env.outputName = self.env.outputName + str(x) + str(y)
+	self.env.location = ee.Geometry.Polygon([[102.716,18.615],[105.622,18.620],[105.540,22.451],[102.650,22.466],[104.716,18.615]])
+	#self.env.outputName = self.env.outputName + str(x) + str(y)
 	 
         logging.info('starting the model the model')
         	
@@ -224,68 +249,75 @@ class SurfaceReflectance():
 	logging.info('Cloudcover filter = ' + str(self.env.metadataCloudCoverMax))	
 	
         # get the images
-        collection = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
-        	
-        # calculate the percentiles
-
-        #print percentiles.getInfo()
-	fullCollection = self.returnCollection()  
+        collection = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax).select(self.env.exportBands)
+	collection = collection.map(self.maskClouds)   
 	
-	# Get some pixel-wise stats for the time series
-	self.irStdDev = ee.Image(fullCollection.select(self.env.shadowSumBands).reduce(ee.Reducer.stdDev()))
-	self.irMean = ee.ImageCollection(fullCollection.select(self.env.shadowSumBands)).mean()
-	
-	collection = collection.map(self.simpleTDOM2)
-
-
-	# get upper and lower percentile
-        self.percentile = fullCollection.reduce(ee.Reducer.percentile([self.env.lowPercentile,self.env.highPercentile])) 
-	collection = collection.map(self.MaskPercentile) 
-	img = ee.Image(collection.median())
-	
-	# mask all negative values
-	mask = img.gt(0)
-	img = ee.Image(img.updateMask(mask))
-	
-
-        count = collection.size();
+	count = collection.size();
         print('counted ' + str(count.getInfo()) +' images');    
 	
-	startDate = ee.Date.fromYMD(self.env.startYear-1,1,1)
-        endDate = ee.Date.fromYMD(self.env.endYear-1,12,31)   
-	
-	#img = img.select(self.env.exportBands)
+  		
+	if self.env.applyTDOM:
+	    # years before and after
+	    y = int(self.env.TDOMyears / 2)
+	    start = ee.Date.fromYMD(self.env.startYear-y,1,1)
+	    end = ee.Date.fromYMD(self.env.startYear+y,1,1)
+	    self.fullCollection = self.returnCollection(start,end).select(self.env.exportBands)
+	    collection = self.maskShadows(collection)
 
-	#img = self.addIndices(img)
-	#img = self.getTasseledCap(img,self.env.tcInputBands )
-	#img = self.addTCAngles(img)
-		
+	# filter for high outliers
+	if self.env.filterPercentile:
+	    # years before and after
+	    logging.info("high percentile: " + str(self.env.highPercentile))
+	    logging.info("low percentile: " + str(self.env.lowPercentile))
+	    y = int(self.env.filterPercentileYears / 2)
+	    start = ee.Date.fromYMD(self.env.startYear-y,1,1)
+	    end = ee.Date.fromYMD(self.env.startYear+y,1,1)
+	    self.fullCollection = self.returnCollection(start,end).select(self.env.exportBands) 	
+	    self.percentile = self.fullCollection.reduce(ee.Reducer.percentile([self.env.lowPercentile,self.env.highPercentile])) 
+	    collection = collection.map(self.MaskPercentile) 
+	
+	
+	
+	if self.env.calcMedoid:
+	    img = self.medoidMosaic(collection) 
+   
+	        
+	if self.env.fillGaps:
+	    
+	    gapfilter = img.select(["blue"]).gt(0).multiply(self.env.startYear)
+	    img = img.addBands(gapfilter.rename(['gapfill']))
+	    for i in range(1,self.env.fillGapYears,1):
+		img = self.unmaskYears(img,i)    
 
+	    #for i in range(1,5,1):
+	    #    img = self.unmaskFutureYears(img,i)    
 
+	if self.env.getIndices:
+	    img = self.getAllIndices(img)
 	
-	
-	#previousAssemblage = ee.Image(self.env.collection.filterDate(startDate,endDate).mosaic())
-	
-	#print previousAssemblage.bandNames().getInfo()
-
-	
-	#img = ee.Image(img).unmask(previousAssemblage)
-	#print ee.Image(img).bandNames().getInfo()
-	
-	for i in range(1,17,1):
-	    img = self.unmaskYears(img,i)    
-
-	for i in range(1,12,1):
-	    img = self.unmaskFutureYears(img,i)    
-	
+	# rescale to save as int16
 	img = ee.Image(self.reScaleLandsat(img))
-
+	
+	# export image
 	self.ExportToAsset(img,self.env.outputName)
+	
 
+	
+    def getAllIndices(self,img):
+	""" get all indices"""
 
-        
-          
-    # Obtain Landsat image collections 
+	if self.env.calcIndices:
+	    img = self.addIndices(img)
+	
+	if self.env.calcTasselcap:
+	    img = self.getTasseledCap(img,self.env.tcInputBands )
+	
+	if self.env.calcTCangles:
+	    img = self.addTCAngles(img)
+	
+	return img
+             
+
     def GetLandsat(self,startDate,endDate,metadataCloudCoverMax):
         """Get the Landsat imagery"""  
         
@@ -293,92 +325,104 @@ class SurfaceReflectance():
             
         # boolean to merge Landsat; when true is merges with another collection
         merge = False
-		
+	
+	self.landsat4count = 0
+	self.landsat5count = 0
+	self.landsat7count = 0
+	self.landsat8count = 0
+	
+	#print startDate, endDate, self.env.startJulian,self.env.endJulian	
         # landsat4 image collections 
         if self.env.useL4:        
             landsat4 =  ee.ImageCollection('LANDSAT/LT04/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
             landsat4 = landsat4.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             landsat4 = landsat4.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
-            if self.env.defringe == True:
-                 landsat4 =  landsat4.map(self.DefringeLandsat)
-            if self.env.maskSR == True:
-                landsat4 = landsat4.map(self.CloudMaskSR)
-            if not merge:
-		landsatCollection = landsat4.select(self.env.sensorBandDictLandsatSR.get('L4'),self.env.bandNamesLandsat)
-		merge = True
+	    self.landsat4count  = str(landsat4.size().getInfo()) 
+	    if landsat4.size().getInfo() > 0:
+		if self.env.defringe == True:
+		     landsat4 =  landsat4.map(self.DefringeLandsat)
+		if self.env.maskSR == True:
+		    landsat4 = landsat4.map(self.CloudMaskSR)
+		if not merge:
+		    landsatCollection = landsat4.select(self.env.sensorBandDictLandsatSR.get('L4'),self.env.bandNamesLandsat)
+		    merge = True
 	
         # landsat 5 image collections 
         if self.env.useL5:
             landsat5 =  ee.ImageCollection('LANDSAT/LT05/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
             landsat5 = landsat5.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             landsat5 = landsat5.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
-            if self.env.defringe == True:
-                 landsat5 =  landsat5.map(self.DefringeLandsat)
-            if self.env.maskSR == True:
-                landsat5 = landsat5.map(self.CloudMaskSR)
-            if not merge:
-		landsatCollection = landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat)
-		merge = True
-            else:
-		landsatCollection = landsatCollection.merge(landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat))
-	
-        # landsat 7 image collections  
-        if self.env.useL7:
-            landsat7 =  ee.ImageCollection('LANDSAT/LE07/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
-	    if self.env.startYear == 2003 or  self.env.endYear == 2003:
-		if self.env.useL7scanline == False:
-		    landsat7 = landsat7.filterDate(startDate,self.env.l7Failed)
-            landsat7 = landsat7.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
-            landsat7 = landsat7.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
-            if landsat7.size().getInfo() > 0:
+	    self.landsat5count  = str(landsat5.size().getInfo()) 
+	    if landsat5.size().getInfo() > 0:
 		if self.env.defringe == True:
-		    landsat7 =  landsat7.map(self.DefringeLandsat)            
+		     landsat5 =  landsat5.map(self.DefringeLandsat)
 		if self.env.maskSR == True:
-		    landsat7 = landsat7.map(self.CloudMaskSR)
+		    landsat5 = landsat5.map(self.CloudMaskSR)
 		if not merge:
-		    landsatCollection = landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat)
+		    landsatCollection = landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat)
 		    merge = True
 		else:
-		    landsatCollection = landsatCollection.merge(landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat))
-	"""
+		    landsatCollection = landsatCollection.merge(landsat5.select(self.env.sensorBandDictLandsatSR.get('L5'),self.env.bandNamesLandsat))
+	
+        # landsat 7 image collections  
+        l7slm = True
+	if self.env.useL7:
+            landsat7 =  ee.ImageCollection('LANDSAT/LE07/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
+	    if self.env.startYear == 2003 or self.env.endYear == 2003:
+		if self.env.useL7scanline == False:
+		    landsat7 = landsat7.filterDate(startDate,self.env.l7Failed)
+	    if self.env.startYear > 2003 and self.env.useL7scanline == False:
+		l7slm = False
+	    if l7slm == True:
+		landsat7 = landsat7.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
+		landsat7 = landsat7.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
+		self.landsat7count = str(landsat7.size().getInfo()) 
+		if landsat7.size().getInfo() > 0:
+		    if self.env.defringe == True:
+			landsat7 =  landsat7.map(self.DefringeLandsat)            
+		    if self.env.maskSR == True:
+			landsat7 = landsat7.map(self.CloudMaskSR)
+		    if not merge:
+			landsatCollection = landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat)
+			merge = True
+		    else:
+			landsatCollection = landsatCollection.merge(landsat7.select(self.env.sensorBandDictLandsatSR.get('L7'),self.env.bandNamesLandsat))
+
         # landsat8  image collections 				        
         if self.env.useL8:
-            landsat8 =  ee.ImageCollection('LANDSAT/LC8_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
+            landsat8 =  ee.ImageCollection('LANDSAT/LC08/C01/T1_SR').filterDate(startDate,endDate).filterBounds(self.env.location)
             landsat8 = landsat8.filterMetadata('CLOUD_COVER','less_than',metadataCloudCoverMax)
             landsat8 = landsat8.filter(ee.Filter.calendarRange(self.env.startJulian,self.env.endJulian))
-            if self.env.defringe == True:
-                 landsat8 =  landsat8.map(self.DefringeLandsat)    
-            #if self.env.maskSR == True:
-            #    landsat8 = landsat8.map(self.maskHaze)            
-            if not merge:
-		landsatCollection = landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat)
-		merge = True
-            else:
-		landsatCollection = landsatCollection.merge(landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat))            
-        """
+	    self.landsat8count =str(landsat8.size().getInfo())
+	    if landsat8.size().getInfo() > 0:
+		if self.env.maskSR == True:
+		    landsat8 = landsat8.map(self.CloudMaskSRL8)    
+		if not merge:
+		    landsatCollection = landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat)
+		    merge = True
+		else:
+		    landsatCollection = landsatCollection.merge(landsat8.select(self.env.sensorBandDictLandsatSR.get('L8'),self.env.bandNamesLandsat))            
+   
         count = landsatCollection.size();
 	
-        landsatCollection = landsatCollection.map(self.ScaleLandsat)        
-        landsatCollection = landsatCollection.map(self.landsatCloudScore)        
-	       
-        logging.info('counted ' + str(count.getInfo()) +' images');           
-        logging.info('returning imagecollection')
-
+        landsatCollection = landsatCollection.map(self.ScaleLandsat)         
+	
         # return the image collection           
         return ee.ImageCollection(landsatCollection)
        
 
-    def returnCollection(self):
+    def returnCollection(self,start,end):
         """Calculate percentiles to filter imagery"""  
         
         logging.info('calculate percentiles')
         
-        startDate = ee.Date.fromYMD(1984,1,1)
-        endDate = ee.Date.fromYMD(2020,1,1)    
-        cloudCoverMax = 30
+        #startDate = ee.Date.fromYMD(1984,1,1)
+        #endDate = ee.Date.fromYMD(2099,1,1)    
+        cloudCoverMax = self.env.metadataCloudCoverMax 
         
         # get the images
-        collection = self.GetLandsat(startDate,endDate,cloudCoverMax)
+        collection = self.GetLandsat(start,end,cloudCoverMax)
+        collection = collection.map(self.maskClouds)   
 	
 	return collection
        
@@ -391,6 +435,19 @@ class SurfaceReflectance():
         
          return img.updateMask(QA.lt(112)).copyProperties(img)
          #return img.addBands(mask.select('internal_quality_flag'))
+
+    def CloudMaskSRL8(self,img):
+         """apply cf-mask Landsat""" 
+	 
+	 QA = img.select("pixel_qa")
+	 #mask = ee.Image(self.getQABits(QA,3, 5, 'internal_quality_flag')); 
+	 # clear and water
+         mask = QA.lt(325)
+	 snow = QA.eq(480)
+	 
+	 mask = mask.add(snow)
+	 
+         return img.updateMask(mask).copyProperties(img)
 
     def ScaleLandsat(self,img):
         """Landast is scaled by factor 0.0001 """
@@ -407,11 +464,12 @@ class SurfaceReflectance():
         
 	thermalBand = ee.List(['thermal'])
 	thermal = ee.Image(img).select(thermalBand).multiply(10)
+	gapfill = ee.Image(img).select('gapfill')
 	
 	otherBands = ee.Image(img).bandNames().removeAll(thermalBand)
         scaled = ee.Image(img).select(otherBands).divide(0.0001)
 	
-	image = ee.Image(scaled.addBands(thermal)).int16()
+	image = ee.Image(scaled.addBands(thermal).addBands(gapfill)).int16()
         logging.info('return scaled image')
         
 	return image.copyProperties(img)
@@ -432,11 +490,12 @@ class SurfaceReflectance():
 	logging.info('mask light and dark areas')
 	
 	# GEE adds _p_percentile to bandname
+		
 	upper = str(int(self.env.highPercentile))
 	lower = str(int(self.env.lowPercentile))
 	
 	# we dont want to include the mask
-	selectedBandNamesLandsat =['blue','green','red','nir'] #,'swir1','swir2']
+	selectedBandNamesLandsat =['blue','green','red','nir','swir1','swir2']
 
 	for b in selectedBandNamesLandsat:
 	    
@@ -456,63 +515,70 @@ class SurfaceReflectance():
 	    darkMask = ee.Image(imgToMask.lt(percentilesLow).reduce(ee.Reducer.sum())).eq(0)
 	    lightMask = ee.Image(imgToMask.gt(percentilesUp).reduce(ee.Reducer.sum())).eq(0)
 	    
-	    img = ee.Image(img.updateMask(lightMask).updateMask(darkMask).copyProperties(img))
+	    #img = ee.Image(img.updateMask(lightMask).updateMask(darkMask).copyProperties(img))
+	    img = ee.Image(img.updateMask(lightMask).copyProperties(img))
 	    
 	return img
 
 
-    def rescale(self,img, exp, thresholds):
-	""" A helper to apply an expression and linearly rescale the output.
-	    Used in the landsatCloudScore function below."""
-	#image = ee.Image(img).expression(exp, {img: img}) #.subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
-	image = ee.Image(img).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
-	return ee.Image(image)
-
-
-    def landsatCloudScore(self,img):
-	""" Compute a cloud score and adds a band that represents the cloud mask.  
-	    This expects the input image to have the common band names: 
-	    ["red", "blue", etc], so it can work across sensors. """
-	
-	# Compute several indicators of cloudiness and take the minimum of them.
-	score = ee.Image(1.0);
-	#Clouds are reasonably bright in the blue band.
-	score = ee.Image(score.min(self.rescale(img, 'img.blue', [0.1, 0.3])));
  
-	# Clouds are reasonably bright in all visible bands.
-	score = ee.Image(score.min(self.rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8])));
-   
-	# Clouds are reasonably bright in all infrared bands.
-	score = ee.Image(score.min(self.rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8])));
 
-	# Clouds are reasonably cool in temperature.
-	score = ee.Image(score.min(self.rescale(img,'img.temp', [300, 290])));
+    def maskClouds(self,img):
 
-	# However, clouds are not snow.
-	ndsi = ee.Image(img).normalizedDifference(['green', 'swir1']);
-	score =  ee.Image(score.min(self.rescale(ndsi, 'img', [0.8, 0.6])).multiply(100).byte());
-	score = ee.Image(score.lt(self.env.cloudThreshold));
-	image = ee.Image(img).updateMask(score);
-	
-	return ee.Image(image).copyProperties(img)
+        score = ee.Image(1.0);
+        # Clouds are reasonably bright in the blue band.
+        blue_rescale = img.select('blue').subtract(ee.Number(0.1)).divide(ee.Number(0.3).subtract(ee.Number(0.1)))
+        score = score.min(blue_rescale);
 
+        # Clouds are reasonably bright in all visible bands.
+        visible = img.select('red').add(img.select('green')).add(img.select('blue'))
+        visible_rescale = visible.subtract(ee.Number(0.2)).divide(ee.Number(0.8).subtract(ee.Number(0.2)))
+        score = score.min(visible_rescale);
 
-    def simpleTDOM2(self,img):
-	""" Function for finding dark outliers in time series.
-	Original concept written by Carson Stam and adapted by Ian Housman.
-	Adds a band that is a mask of pixels that are dark, and dark outliers."""
- 
-	zScore = img.select(self.env.shadowSumBands).subtract(self.irMean).divide(self.irStdDev);
-	irSum = img.select(self.env.shadowSumBands).reduce(ee.Reducer.sum());
-	TDOMMask = zScore.lt(self.env.zScoreThresh).reduce(ee.Reducer.sum()).eq(2).And(irSum.lt(self.env.shadowSumThresh)).Not();
-	TDOMMask = TDOMMask.focal_min(self.env.dilatePixels);
-	
-	return img.updateMask(TDOMMask);
+        # Clouds are reasonably bright in all infrared bands.
+        infrared = img.select('nir').add(img.select('swir1')).add(img.select('swir2'))
+        infrared_rescale = infrared.subtract(ee.Number(0.3)).divide(ee.Number(0.8).subtract(ee.Number(0.3)))
+        score = score.min(infrared_rescale);
+
+        # Clouds are reasonably cool in temperature.
+        temp_rescale = img.select('thermal').subtract(ee.Number(300)).divide(ee.Number(290).subtract(ee.Number(300)))
+        score = score.min(temp_rescale);
+
+        # However, clouds are not snow.
+        ndsi = img.normalizedDifference(['green', 'swir1']);
+        ndsi_rescale = ndsi.subtract(ee.Number(0.8)).divide(ee.Number(0.6).subtract(ee.Number(0.8)))
+        score =  score.min(ndsi_rescale).multiply(100).byte();
+        mask = score.lt(self.env.cloudThreshold).rename(['cloudMask']);
+        img = img.updateMask(mask);
+        
+	return img;
+
+    def maskShadows(self,collection,zScoreThresh=-0.8,shadowSumThresh=0.35,dilatePixels=2):
+
+        def TDOM(image):
+            zScore = image.select(shadowSumBands).subtract(irMean).divide(irStdDev)
+            irSum = image.select(shadowSumBands).reduce(ee.Reducer.sum())
+            TDOMMask = zScore.lt(zScoreThresh).reduce(ee.Reducer.sum()).eq(2)\
+                .And(irSum.lt(shadowSumThresh)).Not()
+            TDOMMask = TDOMMask.focal_min(dilatePixels)
+            
+	    return image.updateMask(TDOMMask)
+
+        shadowSumBands = ['nir','swir1']
+
+        # Get some pixel-wise stats for the time series
+        irStdDev = self.fullCollection.select(shadowSumBands).reduce(ee.Reducer.stdDev())
+        irMean = self.fullCollection.select(shadowSumBands).reduce(ee.Reducer.mean())
+
+        # Mask out dark dark outliers
+        collection_tdom = collection.map(TDOM)
+
+        return collection_tdom
 
     def ExportToAsset(self,img,assetName):  
         """export to asset """
         
-        outputName = self.env.userID + assetName
+        outputName = self.env.userID + assetName +self.env.timeString 
         logging.info('export image to asset: ' + str(outputName))   
 	
         startDate = ee.Date.fromYMD(self.env.startYear,1,1)
@@ -522,11 +588,35 @@ class SurfaceReflectance():
 				    'startyear':self.env.startYear, \
 			            'endyear':self.env.endYear, \
 			            'startJulian':self.env.startJulian, \
+			            'startJulian':self.env.startJulian, \
 		                    'endJulian':self.env.endJulian,
-				    'source':'USGS SR',\
+				    'source':'USGS_SR',\
+				    'median':self.env.calcMedian,\
+				    'mean':self.env.calcMean,\
+				    'medoid':self.env.calcMedoid,\
+				    'count_landsat_4':self.landsat4count,\
+				    'count_landsat_5':self.landsat5count,\
+				    'count_landsat_7':self.landsat7count,\
+				    'count_landsat_8':self.landsat8count,\
+				    'cloud_threshold':self.env.metadataCloudCoverMax ,\
+				    'defringe':str(self.env.defringe),\
+				    'apply_usgs_cloud_filter': str(self.env.maskSR ),\
+				    'applyTDOM':self.env.applyTDOM,\
+				    'pixel_size':self.env.pixSize,\
+				    'zScoreThresh':self.env.zScoreThresh,\
+				    'shadowSumThresh':self.env.shadowSumThresh,\
+				    'dilatePixels':self.env.dilatePixels,\
+				    'filter_percentile':str(self.env.filterPercentile),\
+				    'filter_percentile_years':self.env.filterPercentileYears,\
+				    'upper_percentile': self.env.highPercentile,\
+				    'calculate_indices':str(self.env.getIndices),\
+				    'calculate_tasselcap':str(self.env.calcTasselcap),\
+				    'calculate_tasselcap_angles':str(self.env.calcTCangles),\
+				    'Gap_filling':str(self.env.fillGaps),\
+				    'years_of_gap_filling':self.env.fillGapYears,\
 				    'version':'1.0'}).clip(self.env.mekongRegion) 
-	
-        
+
+
         #task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(img), description=str(self.env.timeString)+assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
         task_ordered = ee.batch.Export.image.toAsset(image=ee.Image(image), description=assetName, assetId=outputName,region=self.env.location['coordinates'], maxPixels=1e13,scale=self.env.pixSize)
         
@@ -609,11 +699,18 @@ class SurfaceReflectance():
 	print "unmasking for year " + str(self.env.startYear-year) 
 	startDate = ee.Date.fromYMD(self.env.startYear-year,1,1)
 	endDate = ee.Date.fromYMD(self.env.endYear-year,12,31)    
-	prev = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
+	prev = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax).select(self.env.exportBands)
+	prev = self.maskShadows(prev)
 	if prev.size().getInfo() > 0:
 	    prev = prev.map(self.MaskPercentile) 
-	    previmg = ee.Image(prev.median())
+	    previmg = self.medoidMosaic(prev) 
+	    
+	    #previmg = ee.Image(prev.median())
+	    
 	    previmg = previmg.mask(previmg.gt(0))
+	    gapfilter = previmg.select(["blue"]).gt(0).multiply(self.env.startYear-year)
+	    previmg = previmg.addBands(gapfilter.rename(['gapfill']))
+	    
 	    img = img.unmask(previmg)
 	
 	return ee.Image(img)
@@ -624,10 +721,13 @@ class SurfaceReflectance():
 	print "unmasking for year " + str(self.env.startYear+year) 
 	startDate = ee.Date.fromYMD(self.env.startYear+year,1,1)
 	endDate = ee.Date.fromYMD(self.env.endYear+year,12,31)    
-	prev = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax)
+	prev = self.GetLandsat(startDate,endDate,self.env.metadataCloudCoverMax).select(self.env.exportBands)
+	prev = self.maskShadows(prev)
+	prev = prev.map(self.MaskPercentile) 
 	if prev.size().getInfo() > 0:
 	    prev = prev.map(self.MaskPercentile) 
-	    previmg = ee.Image(prev.median())
+	    previmg = self.medoidMosaic(prev) 
+	    #previmg = ee.Image(prev.median())
 	    previmg = previmg.mask(previmg.gt(0))
 	    img = img.unmask(previmg)
 	
@@ -705,6 +805,27 @@ class SurfaceReflectance():
 	img = img.addBands(tcAngleBG).addBands(tcAngleGW).addBands(tcAngleBW).addBands(tcDistBG).addBands(tcDistGW).addBands(tcDistBW);
 	return img;
 
+	
+    def medoidMosaic(self,collection):
+	""" medoid composite with equal weight among indices """
+	
+	f = ee.Image(collection.first());
+	bandNames = f.bandNames();
+	bandNumbers = ee.List.sequence(1,bandNames.length());
+	median = ee.ImageCollection(collection).median();
+	
+	def subtractmedian(img):
+	    diff = ee.Image(img).subtract(median).pow(ee.Image.constant(2));
+	    return diff.reduce('sum').addBands(img);
+	
+	medoid = collection.map(subtractmedian)
+  
+	medoid = ee.ImageCollection(medoid).reduce(ee.Reducer.min(bandNames.length().add(1))).select(bandNumbers,bandNames);
+  
+	return medoid;
+
+
+
 class Primitives():
  
     def __init__(self):
@@ -742,5 +863,5 @@ if __name__ == "__main__":
     # create a new file in ~/.config/earthengine/credentials with token of user
     addUserCredentials(userName)
     geom = ''    
-    #SurfaceReflectance().RunModel(geom,1,1)
-    SurfaceReflectance().makeTiles()
+    SurfaceReflectance().RunModel(geom,1,1)
+    #SurfaceReflectance().makeTiles()
