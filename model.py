@@ -280,17 +280,15 @@ class SurfaceReflectance():
 	
 	if self.env.calcMedoid:
 	    img = self.medoidMosaic(collection) 
-   
 	        
-	if self.env.fillGaps:
-	    
+	if self.env.fillGaps: 
 	    gapfilter = img.select(["blue"]).gt(0).multiply(self.env.startYear)
 	    img = img.addBands(gapfilter.rename(['gapfill']))
 	    for i in range(1,self.env.fillGapYears,1):
 		img = self.unmaskYears(img,i)    
 
-	    #for i in range(1,5,1):
-	    #    img = self.unmaskFutureYears(img,i)    
+	    for i in range(1,self.env.fillGapYears,1):
+	        img = self.unmaskFutureYears(img,i)    
 
 	if self.env.getIndices:
 	    img = self.getAllIndices(img)
@@ -463,10 +461,12 @@ class SurfaceReflectance():
         """Landast is scaled by factor 0.0001 """
         
 	thermalBand = ee.List(['thermal'])
+	gapfillBand = ee.List(['gapfill'])
 	thermal = ee.Image(img).select(thermalBand).multiply(10)
 	gapfill = ee.Image(img).select('gapfill')
 	
 	otherBands = ee.Image(img).bandNames().removeAll(thermalBand)
+	otherBands = otherbands.removeAll(gapfillBand)
         scaled = ee.Image(img).select(otherBands).divide(0.0001)
 	
 	image = ee.Image(scaled.addBands(thermal).addBands(gapfill)).int16()
@@ -726,11 +726,12 @@ class SurfaceReflectance():
 	prev = prev.map(self.MaskPercentile) 
 	if prev.size().getInfo() > 0:
 	    prev = prev.map(self.MaskPercentile) 
-	    previmg = self.medoidMosaic(prev) 
-	    #previmg = ee.Image(prev.median())
+	    previmg = self.medoidMosaic(prev) 	    
 	    previmg = previmg.mask(previmg.gt(0))
+	    gapfilter = previmg.select(["blue"]).gt(0).multiply(self.env.startYear-year)
+	    previmg = previmg.addBands(gapfilter.rename(['gapfill']))
+	    
 	    img = img.unmask(previmg)
-	
 	return ee.Image(img)
 
     def makeTiles(self):
